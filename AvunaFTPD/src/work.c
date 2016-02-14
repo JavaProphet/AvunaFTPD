@@ -293,6 +293,7 @@ void handleLine(int wfd, struct timespec* stt, struct conn* conn, struct work_pa
 			writeFTPBMLine(conn, 211, "Extensions supported:");
 			writeFTPMMLine(conn, "MDTM");
 			writeFTPMMLine(conn, "PASV");
+			writeFTPMMLine(conn, "REST");
 			writeFTPMMLine(conn, "SIZE");
 			writeFTPMMLine(conn, "UTF8");
 			if (param->cert != NULL) {
@@ -488,6 +489,7 @@ void handleLine(int wfd, struct timespec* stt, struct conn* conn, struct work_pa
 				setenv("AVFTPD_FILE", chr, 1);
 				setenv("AVFTPD_UID", uids, 1);
 				setenv("AVFTPD_GID", gids, 1);
+				setenv("AVFTPD_SKIP", conn->skip, 1);
 				setenv("AVFTPD_EXPECTED", mip, 1);
 				if (conn->tls && conn->prot == 'p') {
 					setenv("AVFTPD_CERT", param->cert->certf, 1);
@@ -496,6 +498,7 @@ void handleLine(int wfd, struct timespec* stt, struct conn* conn, struct work_pa
 				}
 				execl(ourbinary, ourbinary, NULL);
 			} else {
+				conn->skip = 0;
 				int st = 0; // TODO: non blocking
 				waitpid(frk, &st, 0);
 				if (st == 0) {
@@ -545,6 +548,7 @@ void handleLine(int wfd, struct timespec* stt, struct conn* conn, struct work_pa
 				setenv("AVFTPD_FILE", chr, 1);
 				setenv("AVFTPD_UID", uids, 1);
 				setenv("AVFTPD_GID", gids, 1);
+				setenv("AVFTPD_SKIP", conn->skip, 1);
 				setenv("AVFTPD_EXPECTED", mip, 1);
 				if (conn->tls && conn->prot == 'p') {
 					setenv("AVFTPD_CERT", param->cert->certf, 1);
@@ -602,6 +606,7 @@ void handleLine(int wfd, struct timespec* stt, struct conn* conn, struct work_pa
 				setenv("AVFTPD_FILE", chr, 1);
 				setenv("AVFTPD_UID", uids, 1);
 				setenv("AVFTPD_GID", gids, 1);
+				setenv("AVFTPD_SKIP", conn->skip, 1);
 				setenv("AVFTPD_EXPECTED", mip, 1);
 				if (conn->tls && conn->prot == 'p') {
 					setenv("AVFTPD_CERT", param->cert->certf, 1);
@@ -773,6 +778,7 @@ void handleLine(int wfd, struct timespec* stt, struct conn* conn, struct work_pa
 				setenv("AVFTPD_FILE", chr, 1);
 				setenv("AVFTPD_UID", uids, 1);
 				setenv("AVFTPD_GID", gids, 1);
+				setenv("AVFTPD_SKIP", conn->skip, 1);
 				setenv("AVFTPD_EXPECTED", mip, 1);
 				if (conn->tls && conn->prot == 'p') {
 					setenv("AVFTPD_CERT", param->cert->certf, 1);

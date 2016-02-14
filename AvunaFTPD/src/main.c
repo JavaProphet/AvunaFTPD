@@ -92,7 +92,6 @@ int main(int argc, char* argv[]) {
 			int r = gnutls_handshake(session);
 			while (r != GNUTLS_E_SUCCESS) {
 				if (gnutls_error_is_fatal(r)) {
-					close(fd);
 					return 1;
 				}
 				gnutls_handshake(session);
@@ -101,16 +100,17 @@ int main(int argc, char* argv[]) {
 		char* file = getenv("AVFTPD_FILE");
 		char* uids = getenv("AVFTPD_UID");
 		char* gids = getenv("AVFTPD_GID");
+		char* sks = getenv("AVFTPD_GID");
 		if (uids == NULL || file == NULL || gids == NULL) return 1;
 		uid_t uid = atol(uids);
 		uid_t gid = atol(gids);
+		size_t sk = sks == NULL ? 0 : atol(sks);
 		setgid(gid);
 		setuid(uid);
 		if (streq_nocase(com, "list")) {
 			if (tls) {
 				int pipes[2];
 				if (pipe(pipes)) {
-					close(fd);
 					return 1;
 				}
 				dup2(pipes[1], STDOUT_FILENO);
@@ -131,7 +131,6 @@ int main(int argc, char* argv[]) {
 							wx += px;
 						}
 					}
-					close (STDOUT_FILENO);
 					gnutls_bye(session, GNUTLS_SHUT_RDWR);
 					return stp;
 				}
@@ -143,7 +142,6 @@ int main(int argc, char* argv[]) {
 				} else {
 					int stp = 0;
 					waitpid(p, &stp, 0);
-					close (STDOUT_FILENO);
 					return stp;
 				}
 			}
@@ -161,6 +159,7 @@ int main(int argc, char* argv[]) {
 				return 1;
 			}
 			ssize_t i;
+			lseek(fid, sk, SEEK_SET);
 			unsigned char buf[1024];
 			while ((i = read(fid, buf, 1024)) > 0) {
 				ssize_t wr = 0;
@@ -172,7 +171,6 @@ int main(int argc, char* argv[]) {
 					wr += wrt;
 				}
 			}
-			close(fid);
 		} else {
 			int stor = streq_nocase(com, "STOR");
 			int stou = streq_nocase(com, "STOU");
@@ -200,6 +198,7 @@ int main(int argc, char* argv[]) {
 			if (fid < 0) {
 				return 1;
 			}
+			lseek(fid, sk, SEEK_SET);
 			ssize_t i;
 			unsigned char buf[1024];
 			while ((i = (tls ? gnutls_record_recv(session, buf, 1024) : read(fd, buf, 1024))) > 0) {
@@ -212,7 +211,6 @@ int main(int argc, char* argv[]) {
 					wr += wrt;
 				}
 			}
-			close(fid);
 		}
 		if (tls) gnutls_bye(session, GNUTLS_SHUT_RDWR);
 		return 0;
