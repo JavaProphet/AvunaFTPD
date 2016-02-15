@@ -879,10 +879,6 @@ void handleLine(int wfd, struct timespec* stt, struct conn* conn, struct work_pa
 				}
 			} else {
 				if (errno == ENOENT) {
-					size_t plt = strlen(path);
-					if (endsWith(path, "/")) {
-						path[--plt] = 0;
-					}
 					char* ep = strrchr(path, '/');
 					if (ep != NULL) {
 						ep[0] = 0;
@@ -891,6 +887,8 @@ void handleLine(int wfd, struct timespec* stt, struct conn* conn, struct work_pa
 						writeFTPLine(conn, 550, "Failed to open file.");
 						if (path != NULL) xfree(path);
 						return;
+					} else {
+						ep[0] = '/';
 					}
 				} else {
 					writeFTPLine(conn, 550, "Failed to open file.");
@@ -898,6 +896,7 @@ void handleLine(int wfd, struct timespec* stt, struct conn* conn, struct work_pa
 					return;
 				}
 			}
+
 			if (rename(conn->ren, path) == 0) {
 				writeFTPLine(conn, 250, "Rename successful.");
 			} else {

@@ -194,7 +194,7 @@ int main(int argc, char* argv[]) {
 					memcpy(file + ofl, si, strlen(si) + 1);
 				}
 			}
-			int fid = open(file, O_RDWR | (appe ? O_APPEND : O_TRUNC) | O_CREAT);
+			int fid = open(file, O_RDWR | (appe ? O_APPEND : O_TRUNC) | O_CREAT, 0664);
 			if (fid < 0) {
 				return 1;
 			}
