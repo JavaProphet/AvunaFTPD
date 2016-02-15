@@ -11,6 +11,7 @@
 #define CAT_UNKNOWN -1
 #define CAT_SERVER 0
 #define CAT_DAEMON 1
+#define CAT_USER 2
 
 struct cnode {
 		int cat;

@@ -4,6 +4,7 @@
  *  Created on: Nov 18, 2015
  *      Author: root
  */
+#define _GNU_SOURCE
 #include "accept.h"
 #include "util.h"
 #include <sys/socket.h>
@@ -18,6 +19,8 @@
 #include "work.h"
 #include <unistd.h>
 #include "tls.h"
+#include "version.h"
+#include <sys/types.h>
 
 void run_accept(struct accept_param* param) {
 	static int one = 1;
@@ -29,6 +32,12 @@ void run_accept(struct accept_param* param) {
 	spfd.events = POLLIN;
 	spfd.revents = 0;
 	spfd.fd = param->server_fd;
+	static char* header = "220 Avuna "
+	DAEMON_NAME
+	" "
+	VERSION
+	"\r\n"; //why formatter?
+	size_t headerlen = strlen(header);
 	while (1) {
 		struct conn* c = xmalloc(sizeof(struct conn));
 		memset(&c->addr, 0, sizeof(struct sockaddr_in6));
@@ -39,6 +48,14 @@ void run_accept(struct accept_param* param) {
 		c->writeBuffer = NULL;
 		c->writeBuffer_size = 0;
 		c->handshaked = 0;
+		c->state = 0;
+		c->user = NULL;
+		c->auth = NULL;
+		c->cwd = NULL;
+		c->skip = 0;
+		c->kwr = 0;
+		c->sendfd = -1;
+		c->pasv = 0;
 		if (param->cert != NULL) {
 			gnutls_init(&c->session, GNUTLS_SERVER | GNUTLS_NONBLOCK);
 			gnutls_priority_set(c->session, param->cert->priority);
@@ -60,7 +77,7 @@ void run_accept(struct accept_param* param) {
 			break;
 		}
 		spfd.revents = 0;
-		int cfd = accept(param->server_fd, &c->addr, &c->addrlen);
+		int cfd = accept4(param->server_fd, &c->addr, &c->addrlen, SOCK_CLOEXEC);
 		if (cfd < 0) {
 			if (errno == EAGAIN) continue;
 			printf("Error while accepting client: %s\n", strerror(errno));
@@ -96,7 +113,11 @@ void run_accept(struct accept_param* param) {
 			}
 		}
 		struct work_param* work = param->works[rand() % param->works_count];
+		c->writeBuffer = xmalloc(headerlen);
+		memcpy(c->writeBuffer, header, headerlen);
+		c->writeBuffer_size = headerlen;
 		if (add_collection(work->conns, c)) { // TODO: send to lowest load, not random
+			xfree(c->writeBuffer);
 			if (errno == EINVAL) {
 				printf("Too many open connections! Closing client.\n");
 			} else {

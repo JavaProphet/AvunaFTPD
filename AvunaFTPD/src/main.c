@@ -31,12 +31,142 @@
 #include <sys/types.h>
 #include <gnutls/gnutls.h>
 #include "tls.h"
+#include <sys/wait.h>
+#include <dirent.h>
 
 int main(int argc, char* argv[]) {
+	char* com = getenv("AVFTPD_COMMAND");
+	if (com != NULL) {
+		int pasv = 1;
+		char* fds = getenv("AVFTPD_ACC_SERVER");
+		if (fds == NULL) {
+			fds = getenv("AVFTPD_ACC_CLIENT");
+			if (fds == NULL) return 1;
+			pasv = 0;
+		}
+		int fd = atoi(fds);
+		if (fd < 0) return 1;
+		struct sockaddr_in sin;
+		if (pasv) {
+			char* exp = getenv("AVFTPD_EXPECTED");
+			if (exp == NULL) return 1;
+			int pfd = fd;
+			while (pasv) {
+				socklen_t l = sizeof(struct sockaddr_in);
+				fd = accept(pfd, (struct sockaddr*) &sin, &l);
+				if (streq(inet_ntoa(sin.sin_addr), exp)) {
+					pasv = 0;
+				}
+			}
+		}
+		char* file = getenv("AVFTPD_FILE");
+		char* uids = getenv("AVFTPD_UID");
+		char* gids = getenv("AVFTPD_GID");
+		char* pips = getenv("AVFTPD_WPIPE");
+		if (uids == NULL || file == NULL || gids == NULL) return 1;
+		uid_t uid = atol(uids);
+		uid_t gid = atol(gids);
+		int pipe = atol(pips);
+		setgid(gid);
+		setuid(uid);
+		if (streq_nocase(com, "list")) {
+			dup2(fd, STDOUT_FILENO);
+			pid_t p = vfork();
+			if (p == 0) {
+				execl("/bin/ls", "/bin/ls", "-lALh", file, NULL);
+			} else {
+				int stp = 0;
+				waitpid(p, &stp, 0);
+				close (STDOUT_FILENO);
+				unsigned char pr = 1;
+				write(pipe, &pr, 1);
+				return stp;
+			}
+		} else if (streq_nocase(com, "NLST")) {
+			DIR* dir = opendir(file);
+			struct dirent* de = NULL;
+			while ((de = readdir(dir)) != NULL) {
+				writeLine(fd, de->d_name, strlen(de->d_name));
+			}
+			closedir(dir);
+		} else if (streq_nocase(com, "RETR")) {
+			int fid = open(file, O_RDONLY);
+			if (fid < 0) {
+				unsigned char pr = 1;
+				write(pipe, &pr, 1);
+				return 1;
+			}
+			ssize_t i;
+			unsigned char buf[1024];
+			while ((i = read(fid, buf, 1024)) > 0) {
+				ssize_t wr = 0;
+				while (wr < i) {
+					ssize_t wrt = write(fd, buf + wr, i - wr);
+					if (wrt < 0) {
+						unsigned char pr = 1;
+						write(pipe, &pr, 1);
+						return 1;
+					}
+					wr += wrt;
+				}
+			}
+			close(fid);
+		} else {
+			int stor = streq_nocase(com, "STOR");
+			int stou = streq_nocase(com, "STOU");
+			int appe = streq_nocase(com, "APPE");
+			if (!stor && !stou && !appe) {
+				unsigned char pr = 1;
+				write(pipe, &pr, 1);
+				return 1;
+			}
+			if (stou) {
+				int i = 1;
+				size_t ofl = strlen(file);
+				char* of = file;
+				while (!access(file, F_OK)) {
+					char si[32];
+					snprintf(si, 32, "%i", i);
+					if (i == 1) {
+						file = xstrdup(file, strlen(si) + 1);
+					} else {
+						file = xrealloc(file, ofl + strlen(si) + 2);
+					}
+					memcpy(file, of, ofl);
+					memcpy(file + ofl, si, strlen(si) + 1);
+				}
+			}
+			int fid = open(file, O_RDWR | (appe ? O_APPEND : O_TRUNC) | O_CREAT);
+			if (fid < 0) {
+				unsigned char pr = 1;
+				write(pipe, &pr, 1);
+				return 1;
+			}
+			ssize_t i;
+			unsigned char buf[1024];
+			while ((i = read(fd, buf, 1024)) > 0) {
+				ssize_t wr = 0;
+				while (wr < i) {
+					ssize_t wrt = write(fid, buf + wr, i - wr);
+					if (wrt < 0) {
+						unsigned char pr = 1;
+						write(pipe, &pr, 1);
+						return 1;
+					}
+					wr += wrt;
+				}
+			}
+			close(fid);
+		}
+		unsigned char pr = 1;
+		write(pipe, &pr, 0);
+		return 0;
+	}
 	if (getuid() != 0 || getgid() != 0) {
 		printf("Must run as root!\n");
 		return 1;
 	}
+	ourbinary = argv[0];
 	printf("Loading Avuna %s %s\n", DAEMON_NAME, VERSION);
 #ifdef DEBUG
 	printf("Running in Debug mode!\n");
@@ -74,7 +204,7 @@ int main(int argc, char* argv[]) {
 	pid_t pid = 0;
 	const char* pid_file = getConfigValue(dm, "pid-file");
 	if (!access(pid_file, F_OK)) {
-		int pidfd = open(pid_file, O_RDONLY);
+		int pidfd = open(pid_file, O_RDONLY | O_CLOEXEC);
 		if (pidfd < 0) {
 			printf("Failed to open PID file! %s\n", strerror(errno));
 			return 1;
@@ -108,15 +238,15 @@ int main(int argc, char* argv[]) {
 				printf("Failed to exit process tree: %s\n", strerror(errno));
 				return 1;
 			}
-			if (freopen("/dev/null", "r", stdin) < 0) {
+			if (freopen("/dev/null", "re", stdin) < 0) {
 				printf("reopening of STDIN to /dev/null failed: %s\n", strerror(errno));
 				return 1;
 			}
-			if (freopen("/dev/null", "w", stderr) < 0) {
+			if (freopen("/dev/null", "we", stderr) < 0) {
 				printf("reopening of STDERR to /dev/null failed: %s\n", strerror(errno));
 				return 1;
 			}
-			if (freopen("/dev/null", "w", stdout) < 0) {
+			if (freopen("/dev/null", "we", stdout) < 0) {
 				printf("reopening of STDOUT to /dev/null failed: %s\n", strerror(errno));
 				return 1;
 			}
@@ -129,7 +259,7 @@ int main(int argc, char* argv[]) {
 	delog->pi = 0;
 	delog->access_fd = NULL;
 	const char* el = getConfigValue(dm, "error-log");
-	delog->error_fd = el == NULL ? NULL : fopen(el, "a"); // fopen will return NULL on error, which works.
+	delog->error_fd = el == NULL ? NULL : fopen(el, "ae"); // fopen will return NULL on error, which works.
 	int pfpl = strlen(pid_file);
 	char* pfp = xcopy(pid_file, pfpl + 1, 0);
 	for (int i = pfpl - 1; i--; i >= 0) {
@@ -143,7 +273,7 @@ int main(int argc, char* argv[]) {
 		return 1;
 	}
 //TODO: chown group to de-escalated
-	FILE *pfd = fopen(pid_file, "w");
+	FILE *pfd = fopen(pid_file, "we");
 	if (pfd == NULL) {
 		errlog(delog, "Error writing PID file: %s.", strerror(errno));
 		return 1;
@@ -199,6 +329,21 @@ int main(int argc, char* argv[]) {
 			else errlog(delog, "Invalid threads for server.");
 			continue;
 		}
+		const char* usp = getConfigValue(serv, "user-provider");
+		if (usp == NULL || !streq_nocase(usp, "file")) { //TODO: implement SQL
+			if (serv->id != NULL) errlog(delog, "Invalid user-provider for server: %s", serv->id);
+			else errlog(delog, "Invalid user-provider for server.");
+			continue;
+		}
+		const char* uspff = NULL;
+		if (streq_nocase(usp, "file")) {
+			uspff = getConfigValue(serv, "user-provider-file");
+			if (uspff == NULL || access(uspff, R_OK)) {
+				if (serv->id != NULL) errlog(delog, "Invalid user-provider-file for server: %s", serv->id);
+				else errlog(delog, "Invalid user-provider-file for server.");
+				continue;
+			}
+		}
 		int tc = atoi(tcc);
 		if (tc < 1) {
 			if (serv->id != NULL) errlog(delog, "Invalid threads for server: %s, must be greater than 1.", serv->id);
@@ -213,7 +358,7 @@ int main(int argc, char* argv[]) {
 		}
 		int mc = atoi(mcc);
 		sock: ;
-		int sfd = socket(namespace, SOCK_STREAM, 0);
+		int sfd = socket(namespace, SOCK_STREAM | SOCK_CLOEXEC, 0);
 		if (sfd < 0) {
 			if (serv->id != NULL) errlog(delog, "Error creating socket for server: %s, %s", serv->id, strerror(errno));
 			else errlog(delog, "Error creating socket for server, %s", strerror(errno));
@@ -305,9 +450,9 @@ int main(int argc, char* argv[]) {
 		struct logsess* slog = xmalloc(sizeof(struct logsess));
 		slog->pi = 0;
 		const char* lal = getConfigValue(serv, "access-log");
-		slog->access_fd = lal == NULL ? NULL : fopen(lal, "a");
+		slog->access_fd = lal == NULL ? NULL : fopen(lal, "ae");
 		const char* lel = getConfigValue(serv, "error-log");
-		slog->error_fd = lel == NULL ? NULL : fopen(lel, "a");
+		slog->error_fd = lel == NULL ? NULL : fopen(lel, "ae");
 		const char* sssl = getConfigValue(serv, "ssl");
 		if (serv->id != NULL) acclog(slog, "Server %s listening for connections!", serv->id);
 		else acclog(slog, "Server listening for connections!");
@@ -339,12 +484,50 @@ int main(int argc, char* argv[]) {
 		ap->works_count = tc;
 		ap->works = xmalloc(sizeof(struct work_param*) * tc);
 		ap->logsess = slog;
+		struct users* users = xmalloc(sizeof(struct users));
+		pthread_rwlock_init(&users->lock, NULL);
+		users->user_count = 0;
+		users->users = NULL;
+		struct config* uc = loadConfig(uspff);
+		if (uc == NULL) {
+			if (serv->id != NULL) errlog(delog, "Error loading users for server: %s, %s", serv->id, strerror(errno));
+			else errlog(delog, "Error loading users for server, %s", strerror(errno));
+			close (sfd);
+			xfree(users);
+			continue;
+		}
+		for (size_t x = 0; x < uc->node_count; x++) {
+			struct cnode* cnu = uc->nodes[x];
+			if (cnu->cat == CAT_USER) {
+				if (users->users) {
+					users->users = xrealloc(users->users, sizeof(struct user*) * (users->user_count + 1));
+				} else {
+					users->users = xmalloc(sizeof(struct user*) * (users->user_count + 1));
+				}
+				struct user* user = xmalloc(sizeof(struct user));
+				users->users[users->user_count++] = user;
+				user->username = cnu->id;
+				user->password = getConfigValue(cnu, "password");
+				user->root = getConfigValue(cnu, "root");
+				const char* uids = getConfigValue(cnu, "uid");
+				const char* gids = getConfigValue(cnu, "gid");
+				if (!user->username || !user->password || !user->root || !uids || !gids) {
+					xfree(user);
+					users->user_count--;
+					errlog(delog, "Invalid user: '%s' in '%s'.", user->username == NULL ? "NULL" : user->username, uspff);
+					continue;
+				}
+				user->uid = atol(uids);
+				user->gid = atol(gids);
+			}
+		}
 		for (int x = 0; x < tc; x++) {
 			struct work_param* wp = xmalloc(sizeof(struct work_param));
 			wp->conns = new_collection(mc < 1 ? 0 : mc / tc, sizeof(struct conn*));
 			wp->logsess = slog;
 			wp->i = x;
 			wp->sport = port;
+			wp->users = users;
 			ap->works[x] = wp;
 		}
 		aps[i] = ap;

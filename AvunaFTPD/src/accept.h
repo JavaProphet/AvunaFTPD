@@ -37,6 +37,14 @@ struct conn {
 		int tls;
 		int handshaked;
 		gnutls_session_t session;
+		int state;
+		char* user;
+		struct user* auth;
+		char* cwd;
+		size_t skip;
+		int kwr;
+		int sendfd;
+		int pasv;
 };
 
 void run_accept(struct accept_param* param);

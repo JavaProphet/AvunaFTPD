@@ -9,7 +9,6 @@
 #include <unistd.h>
 #include <errno.h>
 #include <fcntl.h>
-
 #include "util.h"
 #include "config.h"
 #include "streams.h"
@@ -28,7 +27,7 @@ struct config* loadConfig(const char* file) {
 		errno = EPERM;
 		return NULL;
 	}
-	int fd = open(file, O_RDONLY);
+	int fd = open(file, O_RDONLY | O_CLOEXEC);
 	if (fd < 0) return NULL;
 	struct config* ret = xmalloc(sizeof(struct config));
 	ret->node_count = 0;
@@ -74,6 +73,8 @@ struct config* loadConfig(const char* file) {
 				cat->cat = CAT_SERVER;
 			} else if (streq_nocase(wl, "daemon")) {
 				cat->cat = CAT_DAEMON;
+			} else if (streq_nocase(wl, "user")) {
+				cat->cat = CAT_USER;
 			} else {
 				cat->cat = CAT_UNKNOWN;
 			}
