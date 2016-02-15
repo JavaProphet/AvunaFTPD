@@ -34,6 +34,7 @@ struct work_param {
 		int i;
 		int sport;
 		struct users* users;
+		struct cert* cert;
 };
 
 void run_work(struct work_param* param);

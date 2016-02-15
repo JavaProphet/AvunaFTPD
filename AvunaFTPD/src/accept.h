@@ -43,8 +43,10 @@ struct conn {
 		char* cwd;
 		size_t skip;
 		int kwr;
+		int twr;
 		int sendfd;
 		int pasv;
+		char prot;
 };
 
 void run_accept(struct accept_param* param);

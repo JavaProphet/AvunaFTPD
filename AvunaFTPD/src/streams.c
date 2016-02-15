@@ -7,6 +7,7 @@
 
 #include <stdio.h>
 #include <unistd.h>
+#include <gnutls/gnutls.h>
 
 ssize_t readLine(int fd, char* line, size_t len) {
 	if (len >= 1) line[0] = 0;
@@ -40,6 +41,23 @@ ssize_t writeLine(int fd, char* line, size_t len) {
 	int i2 = 0;
 	while (i2 < 2) {
 		int y = write(fd, nl + i2, 2 - i2);
+		if (y < 0) return -1;
+		i2 += y;
+	}
+	return i;
+}
+
+ssize_t writeLineSSL(gnutls_session_t session, char* line, size_t len) {
+	static char nl[2] = { 0x0A, 0x0D };
+	int i = 0;
+	while (i < len) {
+		int x = gnutls_record_send(session, line + i, len - i);
+		if (x < 0) return -1;
+		i += x;
+	}
+	int i2 = 0;
+	while (i2 < 2) {
+		int y = gnutls_record_send(session, nl + i2, 2 - i2);
 		if (y < 0) return -1;
 		i2 += y;
 	}

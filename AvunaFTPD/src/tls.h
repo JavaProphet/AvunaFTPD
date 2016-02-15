@@ -13,6 +13,9 @@
 struct cert {
 		gnutls_certificate_credentials_t cert;
 		gnutls_priority_t priority;
+		const char* ca;
+		const char* certf;
+		const char* key;
 };
 
 int initdh();

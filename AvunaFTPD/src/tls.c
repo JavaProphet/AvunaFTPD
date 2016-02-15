@@ -22,6 +22,9 @@ int initdh() {
 
 struct cert* loadCert(const char* ca, const char* cert, const char* key) {
 	struct cert* oc = xmalloc(sizeof(struct cert));
+	oc->ca = ca;
+	oc->certf = cert;
+	oc->key = key;
 	gnutls_certificate_allocate_credentials(&oc->cert);
 	if (ca != NULL) gnutls_certificate_set_x509_trust_file(oc->cert, ca, GNUTLS_X509_FMT_PEM);
 	int e1 = gnutls_certificate_set_x509_key_file(oc->cert, cert, key, GNUTLS_X509_FMT_PEM);

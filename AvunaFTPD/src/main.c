@@ -74,6 +74,30 @@ int main(int argc, char* argv[]) {
 				} else close(fd);
 			}
 		}
+		char* certf = getenv("AVFTPD_CERT");
+		char* keyf = getenv("AVFTPD_KEY");
+		char* caf = getenv("AVFTPD_CA");
+		int tls = 0;
+		gnutls_session_t session;
+		if (certf != NULL && keyf != NULL && caf != NULL) {
+			gnutls_global_init();
+			initdh();
+			struct cert* crt = loadCert(caf, certf, keyf);
+			tls = 1;
+			gnutls_init(&session, GNUTLS_SERVER);
+			gnutls_priority_set(session, crt->priority);
+			gnutls_credentials_set(session, GNUTLS_CRD_CERTIFICATE, crt->cert);
+			gnutls_certificate_server_set_request(session, GNUTLS_CERT_IGNORE);
+			gnutls_transport_set_int2(session, fd, fd);
+			int r = gnutls_handshake(session);
+			while (r != GNUTLS_E_SUCCESS) {
+				if (gnutls_error_is_fatal(r)) {
+					close(fd);
+					return 1;
+				}
+				gnutls_handshake(session);
+			}
+		}
 		char* file = getenv("AVFTPD_FILE");
 		char* uids = getenv("AVFTPD_UID");
 		char* gids = getenv("AVFTPD_GID");
@@ -83,30 +107,57 @@ int main(int argc, char* argv[]) {
 		setgid(gid);
 		setuid(uid);
 		if (streq_nocase(com, "list")) {
-			dup2(fd, STDOUT_FILENO);
-			pid_t p = vfork();
-			if (p == 0) {
-				execl("/bin/ls", "/bin/ls", "-lALh", file, NULL);
+			if (tls) {
+				int pipes[2];
+				if (pipe(pipes)) {
+					close(fd);
+					return 1;
+				}
+				dup2(pipes[1], STDOUT_FILENO);
+				pid_t p = vfork();
+				if (p == 0) {
+					execl("/bin/ls", "/bin/ls", "-lALh", file, NULL);
+				} else {
+					int stp = 0;
+					waitpid(p, &stp, 0);
+					ssize_t x = 0;
+					char buf[1024];
+					fcntl(pipes[0], F_SETFL, fcntl(pipes[0], F_GETFL, 0) | O_NONBLOCK);
+					while ((x = read(pipes[0], buf, 1024)) > 0) {
+						ssize_t wx = 0;
+						while (wx < x) {
+							ssize_t px = gnutls_record_send(session, buf + wx, x - wx);
+							if (px < 1) return 1;
+							wx += px;
+						}
+					}
+					close (STDOUT_FILENO);
+					gnutls_bye(session, GNUTLS_SHUT_RDWR);
+					return stp;
+				}
 			} else {
-				int stp = 0;
-				waitpid(p, &stp, 0);
-				close (STDOUT_FILENO);
-				unsigned char pr = 1;
-				write(pipe, &pr, 1);
-				return stp;
+				dup2(fd, STDOUT_FILENO);
+				pid_t p = vfork();
+				if (p == 0) {
+					execl("/bin/ls", "/bin/ls", "-lALh", file, NULL);
+				} else {
+					int stp = 0;
+					waitpid(p, &stp, 0);
+					close (STDOUT_FILENO);
+					return stp;
+				}
 			}
 		} else if (streq_nocase(com, "NLST")) {
 			DIR* dir = opendir(file);
 			struct dirent* de = NULL;
 			while ((de = readdir(dir)) != NULL) {
-				writeLine(fd, de->d_name, strlen(de->d_name));
+				if (tls) writeLineSSL(session, de->d_name, strlen(de->d_name));
+				else writeLine(fd, de->d_name, strlen(de->d_name));
 			}
 			closedir(dir);
 		} else if (streq_nocase(com, "RETR")) {
 			int fid = open(file, O_RDONLY);
 			if (fid < 0) {
-				unsigned char pr = 1;
-				write(pipe, &pr, 1);
 				return 1;
 			}
 			ssize_t i;
@@ -114,10 +165,8 @@ int main(int argc, char* argv[]) {
 			while ((i = read(fid, buf, 1024)) > 0) {
 				ssize_t wr = 0;
 				while (wr < i) {
-					ssize_t wrt = write(fd, buf + wr, i - wr);
+					ssize_t wrt = tls ? gnutls_record_send(session, buf + wr, i - wr) : write(fd, buf + wr, i - wr);
 					if (wrt < 0) {
-						unsigned char pr = 1;
-						write(pipe, &pr, 1);
 						return 1;
 					}
 					wr += wrt;
@@ -129,8 +178,6 @@ int main(int argc, char* argv[]) {
 			int stou = streq_nocase(com, "STOU");
 			int appe = streq_nocase(com, "APPE");
 			if (!stor && !stou && !appe) {
-				unsigned char pr = 1;
-				write(pipe, &pr, 1);
 				return 1;
 			}
 			if (stou) {
@@ -151,19 +198,15 @@ int main(int argc, char* argv[]) {
 			}
 			int fid = open(file, O_RDWR | (appe ? O_APPEND : O_TRUNC) | O_CREAT);
 			if (fid < 0) {
-				unsigned char pr = 1;
-				write(pipe, &pr, 1);
 				return 1;
 			}
 			ssize_t i;
 			unsigned char buf[1024];
-			while ((i = read(fd, buf, 1024)) > 0) {
+			while ((i = (tls ? gnutls_record_recv(session, buf, 1024) : read(fd, buf, 1024))) > 0) {
 				ssize_t wr = 0;
 				while (wr < i) {
 					ssize_t wrt = write(fid, buf + wr, i - wr);
 					if (wrt < 0) {
-						unsigned char pr = 1;
-						write(pipe, &pr, 1);
 						return 1;
 					}
 					wr += wrt;
@@ -171,8 +214,7 @@ int main(int argc, char* argv[]) {
 			}
 			close(fid);
 		}
-		unsigned char pr = 1;
-		write(pipe, &pr, 0);
+		if (tls) gnutls_bye(session, GNUTLS_SHUT_RDWR);
 		return 0;
 	}
 	if (getuid() != 0 || getgid() != 0) {
@@ -542,6 +584,7 @@ int main(int argc, char* argv[]) {
 		}
 		for (int x = 0; x < tc; x++) {
 			struct work_param* wp = xmalloc(sizeof(struct work_param));
+			wp->cert = ap->cert;
 			wp->conns = new_collection(mc < 1 ? 0 : mc / tc, sizeof(struct conn*));
 			wp->logsess = slog;
 			wp->i = x;

@@ -56,15 +56,17 @@ void run_accept(struct accept_param* param) {
 		c->kwr = 0;
 		c->sendfd = -1;
 		c->pasv = 0;
-		if (param->cert != NULL) {
-			gnutls_init(&c->session, GNUTLS_SERVER | GNUTLS_NONBLOCK);
-			gnutls_priority_set(c->session, param->cert->priority);
-			gnutls_credentials_set(c->session, GNUTLS_CRD_CERTIFICATE, param->cert->cert);
-			gnutls_certificate_server_set_request(c->session, GNUTLS_CERT_IGNORE);
-			c->tls = 1;
-		} else {
-			c->tls = 0;
-		}
+		c->twr = 0;
+		c->prot = 'c';
+		//if (param->cert != NULL) {
+		//	gnutls_init(&c->session, GNUTLS_SERVER | GNUTLS_NONBLOCK);
+		//	gnutls_priority_set(c->session, param->cert->priority);
+		//	gnutls_credentials_set(c->session, GNUTLS_CRD_CERTIFICATE, param->cert->cert);
+		//	gnutls_certificate_server_set_request(c->session, GNUTLS_CERT_IGNORE);
+		//	c->tls = 1;
+		//} else {
+		c->tls = 0;
+		//}
 		if (poll(&spfd, 1, -1) < 0) {
 			printf("Error while polling server: %s\n", strerror(errno));
 			xfree(c);
@@ -93,25 +95,25 @@ void run_accept(struct accept_param* param) {
 			close(cfd);
 			continue;
 		}
-		if (param->cert != NULL) {
-			gnutls_transport_set_int2(c->session, cfd, cfd);
-			/*if (sniCallback != NULL) {
-			 struct sni_data* ld = xmalloc(sizeof(struct sni_data));
-			 ld->this = this;
-			 ld->sniCallback = sniCallback;
-			 lsd = ld;
-			 gnutls_handshake_set_post_client_hello_function(sessiond, handleSNI);
-			 }*/
-			int r = gnutls_handshake(c->session);
-			if (gnutls_error_is_fatal(r)) {
-				gnutls_deinit(c->session);
-				close(c->fd);
-				xfree(c);
-				continue;
-			} else if (r == GNUTLS_E_SUCCESS) {
-				c->handshaked = 1;
-			}
-		}
+		//if (param->cert != NULL) {
+		//gnutls_transport_set_int2(c->session, cfd, cfd);
+		/*if (sniCallback != NULL) {
+		 struct sni_data* ld = xmalloc(sizeof(struct sni_data));
+		 ld->this = this;
+		 ld->sniCallback = sniCallback;
+		 lsd = ld;
+		 gnutls_handshake_set_post_client_hello_function(sessiond, handleSNI);
+		 }*/
+		//int r = gnutls_handshake(c->session);
+		//if (gnutls_error_is_fatal(r)) {
+		//	gnutls_deinit(c->session);
+		//	close(c->fd);
+		//	xfree(c);
+		//	continue;
+		//} else if (r == GNUTLS_E_SUCCESS) {
+		//	c->handshaked = 1;
+		//}
+		//}
 		struct work_param* work = param->works[rand() % param->works_count];
 		c->writeBuffer = xmalloc(headerlen);
 		memcpy(c->writeBuffer, header, headerlen);

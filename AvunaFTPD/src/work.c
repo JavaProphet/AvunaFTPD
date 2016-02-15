@@ -24,6 +24,7 @@
 #include <sys/wait.h>
 #include "version.h"
 #include <sys/stat.h>
+#include "tls.h"
 
 char* realpathext(char* path) {
 	const char* orp = path;
@@ -214,6 +215,46 @@ void handleLine(int wfd, struct timespec* stt, struct conn* conn, struct work_pa
 	if (streq_nocase(cmd, "quit")) {
 		writeFTPLine(conn, 221, "Goodbye.");
 		conn->kwr = 1;
+	} else if (streq_nocase(cmd, "auth")) {
+		if (conn->tls) {
+			writeFTPLine(conn, 431, "Already in TLS.");
+		} else if (param->cert != NULL && streq_nocase(line, "tls")) {
+			writeFTPLine(conn, 234, "Begin TLS.");
+			conn->twr = 1;
+		} else {
+			writeFTPLine(conn, 504, "Not supported.");
+		}
+		recog = 1;
+	} else if (streq_nocase(cmd, "pbsz")) {
+		if (conn->tls) {
+			if (streq_nocase(line, "0")) {
+				writeFTPLine(conn, 200, "Buffer size accepted.");
+			} else {
+				writeFTPLine(conn, 200, "PBSZ=0");
+			}
+		} else {
+			writeFTPLine(conn, 503, "Not in TLS.");
+		}
+		recog = 1;
+	} else if (streq_nocase(cmd, "prot")) {
+		if (conn->tls) {
+			if (streq_nocase(line, "p")) {
+				conn->prot = 'p';
+				writeFTPLine(conn, 200, "Protection level accepted.");
+			} else if (streq_nocase(line, "s")) {
+				writeFTPLine(conn, 534, "Invalid PROT value.");
+			} else if (streq_nocase(line, "e")) {
+				writeFTPLine(conn, 534, "Invalid PROT value.");
+			} else if (streq_nocase(line, "c")) {
+				conn->prot = 'c';
+				writeFTPLine(conn, 200, "Protection level accepted.");
+			} else {
+				writeFTPLine(conn, 504, "Invalid PROT value.");
+			}
+		} else {
+			writeFTPLine(conn, 503, "Not in TLS.");
+		}
+		recog = 1;
 	} else if (conn->state == 0) {
 		if (streq_nocase(cmd, "user")) {
 			conn->user = xstrdup(line, 0);
@@ -254,6 +295,9 @@ void handleLine(int wfd, struct timespec* stt, struct conn* conn, struct work_pa
 			writeFTPMMLine(conn, "PASV");
 			writeFTPMMLine(conn, "SIZE");
 			writeFTPMMLine(conn, "UTF8");
+			if (param->cert != NULL) {
+				writeFTPMMLine(conn, "AUTH TLS");
+			}
 			writeFTPLine(conn, 211, "End");
 			recog = 1;
 		} else if (streq_nocase(cmd, "pwd")) {
@@ -445,6 +489,11 @@ void handleLine(int wfd, struct timespec* stt, struct conn* conn, struct work_pa
 				setenv("AVFTPD_UID", uids, 1);
 				setenv("AVFTPD_GID", gids, 1);
 				setenv("AVFTPD_EXPECTED", mip, 1);
+				if (conn->tls && conn->prot == 'p') {
+					setenv("AVFTPD_CERT", param->cert->certf, 1);
+					setenv("AVFTPD_KEY", param->cert->key, 1);
+					setenv("AVFTPD_CA", param->cert->ca, 1);
+				}
 				execl(ourbinary, ourbinary, NULL);
 			} else {
 				int st = 0; // TODO: non blocking
@@ -497,6 +546,11 @@ void handleLine(int wfd, struct timespec* stt, struct conn* conn, struct work_pa
 				setenv("AVFTPD_UID", uids, 1);
 				setenv("AVFTPD_GID", gids, 1);
 				setenv("AVFTPD_EXPECTED", mip, 1);
+				if (conn->tls && conn->prot == 'p') {
+					setenv("AVFTPD_CERT", param->cert->certf, 1);
+					setenv("AVFTPD_KEY", param->cert->key, 1);
+					setenv("AVFTPD_CA", param->cert->ca, 1);
+				}
 				execl(ourbinary, ourbinary, NULL);
 			} else {
 				int st = 0; // TODO: non blocking
@@ -549,6 +603,11 @@ void handleLine(int wfd, struct timespec* stt, struct conn* conn, struct work_pa
 				setenv("AVFTPD_UID", uids, 1);
 				setenv("AVFTPD_GID", gids, 1);
 				setenv("AVFTPD_EXPECTED", mip, 1);
+				if (conn->tls && conn->prot == 'p') {
+					setenv("AVFTPD_CERT", param->cert->certf, 1);
+					setenv("AVFTPD_KEY", param->cert->key, 1);
+					setenv("AVFTPD_CA", param->cert->ca, 1);
+				}
 				execl(ourbinary, ourbinary, NULL);
 			} else {
 				int st = 0; // TODO: non blocking
@@ -601,6 +660,11 @@ void handleLine(int wfd, struct timespec* stt, struct conn* conn, struct work_pa
 				setenv("AVFTPD_UID", uids, 1);
 				setenv("AVFTPD_GID", gids, 1);
 				setenv("AVFTPD_EXPECTED", mip, 1);
+				if (conn->tls && conn->prot == 'p') {
+					setenv("AVFTPD_CERT", param->cert->certf, 1);
+					setenv("AVFTPD_KEY", param->cert->key, 1);
+					setenv("AVFTPD_CA", param->cert->ca, 1);
+				}
 				execl(ourbinary, ourbinary, NULL);
 			} else {
 				int st = 0; // TODO: non blocking
@@ -653,6 +717,11 @@ void handleLine(int wfd, struct timespec* stt, struct conn* conn, struct work_pa
 				setenv("AVFTPD_UID", uids, 1);
 				setenv("AVFTPD_GID", gids, 1);
 				setenv("AVFTPD_EXPECTED", mip, 1);
+				if (conn->tls && conn->prot == 'p') {
+					setenv("AVFTPD_CERT", param->cert->certf, 1);
+					setenv("AVFTPD_KEY", param->cert->key, 1);
+					setenv("AVFTPD_CA", param->cert->ca, 1);
+				}
 				execl(ourbinary, ourbinary, NULL);
 			} else {
 				int st = 0; // TODO: non blocking
@@ -705,6 +774,11 @@ void handleLine(int wfd, struct timespec* stt, struct conn* conn, struct work_pa
 				setenv("AVFTPD_UID", uids, 1);
 				setenv("AVFTPD_GID", gids, 1);
 				setenv("AVFTPD_EXPECTED", mip, 1);
+				if (conn->tls && conn->prot == 'p') {
+					setenv("AVFTPD_CERT", param->cert->certf, 1);
+					setenv("AVFTPD_KEY", param->cert->key, 1);
+					setenv("AVFTPD_CA", param->cert->ca, 1);
+				}
 				execl(ourbinary, ourbinary, NULL);
 			} else {
 				int st = 0; // TODO: non blocking
@@ -1047,9 +1121,33 @@ void run_work(struct work_param* param) {
 				}
 			}
 			cont: ;
-			if (conn != NULL && conn->kwr && conn->writeBuffer_size <= 0) {
-				closeConn(param, conn);
-				conn = NULL;
+			if (conn != NULL && conn->writeBuffer_size <= 0) {
+				if (conn->kwr) {
+					closeConn(param, conn);
+					conn = NULL;
+				} else if (conn->twr) {
+					conn->twr = 0;
+					gnutls_init(&conn->session, GNUTLS_SERVER | GNUTLS_NONBLOCK);
+					gnutls_priority_set(conn->session, param->cert->priority);
+					gnutls_credentials_set(conn->session, GNUTLS_CRD_CERTIFICATE, param->cert->cert);
+					gnutls_certificate_server_set_request(conn->session, GNUTLS_CERT_IGNORE);
+					conn->tls = 1;
+					conn->auth = NULL;
+					if (conn->user != NULL) {
+						xfree(conn->user);
+						conn->user = NULL;
+					}
+					conn->state = 0;
+					conn->handshaked = 0;
+					gnutls_transport_set_int2(conn->session, conn->fd, conn->fd);
+					int r = gnutls_handshake(conn->session);
+					if (gnutls_error_is_fatal(r)) {
+						closeConn(param, conn);
+						continue;
+					} else if (r == GNUTLS_E_SUCCESS) {
+						conn->handshaked = 1;
+					}
+				}
 			}
 			if (--cp == 0) break;
 		}
