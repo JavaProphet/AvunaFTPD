@@ -299,7 +299,7 @@ void handleLine(int wfd, struct timespec* stt, struct conn* conn, struct work_pa
 				writeFTPLine(conn, 500, "Unrecognised TYPE command.");
 			}
 			recog = 1;
-		} else if (streq_nocase(cmd, "pasv")) { //TODO EPSV/EPRT
+		} else if (streq_nocase(cmd, "pasv")) { //TODO EPRT/PORT
 			if (conn->sendfd >= 0) close(conn->sendfd);
 			conn->sendfd = socket(PF_INET, SOCK_STREAM, 0);
 			struct sockaddr_in sin;
@@ -318,9 +318,8 @@ void handleLine(int wfd, struct timespec* stt, struct conn* conn, struct work_pa
 			char pasv[49];
 			pasv[48] = 0;
 			memcpy(pasv, "Entering Passive Mode (", 23);
-			struct in_addr loop;
-			inet_aton("127.0.0.1", &loop);
-			inet_ntop(AF_INET, &loop, pasv + 23, 16);
+			size_t sips = strlen(encip);
+			memcpy(pasv + 23, encip, (sips > 22 ? 22 : sips) + 1);
 			size_t cs = strlen(pasv);
 			for (int i = 23; i < cs; i++) {
 				if (pasv[i] == '.') pasv[i] = ',';
@@ -330,6 +329,31 @@ void handleLine(int wfd, struct timespec* stt, struct conn* conn, struct work_pa
 			getsockname(conn->sendfd, (struct sockaddr *) &sin, &len);
 			snprintf(pasv + cs, 48 - cs, "%i,%i).", sin.sin_port & 0xFF, sin.sin_port >> 8);
 			writeFTPLine(conn, 227, pasv);
+			conn->pasv = 1;
+			recog = 1;
+		} else if (streq_nocase(cmd, "epsv")) { //TODO EPRT/PORT
+			if (conn->sendfd >= 0) close(conn->sendfd);
+			conn->sendfd = socket(PF_INET6, SOCK_STREAM, 0);
+			struct sockaddr_in6 sin;
+			sin.sin6_family = AF_INET6;
+			sin.sin6_addr = in6addr_any;
+			sin.sin6_port = 0;
+			if (conn->sendfd < 0 || bind(conn->sendfd, (struct sockaddr*) &sin, sizeof(sin)) < 0 || listen(conn->sendfd, 1) < 0) {
+				errlog(param->logsess, "Error creating socket for extended passive connection: %s.", strerror(errno));
+				writeFTPLine(conn, 500, "Failed to create EPSV connection.");
+				if (conn->sendfd >= 0) {
+					conn->sendfd = -1;
+					close(conn->sendfd);
+				}
+				return;
+			}
+			char pasv[72];
+			pasv[64] = 0;
+			memcpy(pasv, "Entering Extended Passive Mode (|||", 35);
+			socklen_t len = sizeof(sin);
+			getsockname(conn->sendfd, (struct sockaddr *) &sin, &len);
+			snprintf(pasv + 35, 72 - 35, "%i|).", htons(sin.sin6_port));
+			writeFTPLine(conn, 229, pasv);
 			conn->pasv = 1;
 			recog = 1;
 		} else if (streq_nocase(cmd, "port")) {
@@ -397,8 +421,6 @@ void handleLine(int wfd, struct timespec* stt, struct conn* conn, struct work_pa
 			snprintf(uids, 32, "%i", conn->auth->uid);
 			char gids[32];
 			snprintf(gids, 32, "%i", conn->auth->gid);
-			char pips[32];
-			snprintf(pips, 32, "%i", param->pipes[1]);
 			const char* mip = NULL;
 			char tip[48];
 			if (conn->addr.sin6_family == AF_INET) {
@@ -422,7 +444,6 @@ void handleLine(int wfd, struct timespec* stt, struct conn* conn, struct work_pa
 				setenv("AVFTPD_FILE", chr, 1);
 				setenv("AVFTPD_UID", uids, 1);
 				setenv("AVFTPD_GID", gids, 1);
-				setenv("AVFTPD_WPIPE", pips, 1);
 				setenv("AVFTPD_EXPECTED", mip, 1);
 				execl(ourbinary, ourbinary, NULL);
 			} else {
@@ -452,8 +473,6 @@ void handleLine(int wfd, struct timespec* stt, struct conn* conn, struct work_pa
 			snprintf(uids, 32, "%i", conn->auth->uid);
 			char gids[32];
 			snprintf(gids, 32, "%i", conn->auth->gid);
-			char pips[32];
-			snprintf(pips, 32, "%i", param->pipes[1]);
 			const char* mip = NULL;
 			char tip[48];
 			if (conn->addr.sin6_family == AF_INET) {
@@ -477,7 +496,6 @@ void handleLine(int wfd, struct timespec* stt, struct conn* conn, struct work_pa
 				setenv("AVFTPD_FILE", chr, 1);
 				setenv("AVFTPD_UID", uids, 1);
 				setenv("AVFTPD_GID", gids, 1);
-				setenv("AVFTPD_WPIPE", pips, 1);
 				setenv("AVFTPD_EXPECTED", mip, 1);
 				execl(ourbinary, ourbinary, NULL);
 			} else {
@@ -507,8 +525,6 @@ void handleLine(int wfd, struct timespec* stt, struct conn* conn, struct work_pa
 			snprintf(uids, 32, "%i", conn->auth->uid);
 			char gids[32];
 			snprintf(gids, 32, "%i", conn->auth->gid);
-			char pips[32];
-			snprintf(pips, 32, "%i", param->pipes[1]);
 			const char* mip = NULL;
 			char tip[48];
 			if (conn->addr.sin6_family == AF_INET) {
@@ -532,7 +548,6 @@ void handleLine(int wfd, struct timespec* stt, struct conn* conn, struct work_pa
 				setenv("AVFTPD_FILE", chr, 1);
 				setenv("AVFTPD_UID", uids, 1);
 				setenv("AVFTPD_GID", gids, 1);
-				setenv("AVFTPD_WPIPE", pips, 1);
 				setenv("AVFTPD_EXPECTED", mip, 1);
 				execl(ourbinary, ourbinary, NULL);
 			} else {
@@ -562,8 +577,6 @@ void handleLine(int wfd, struct timespec* stt, struct conn* conn, struct work_pa
 			snprintf(uids, 32, "%i", conn->auth->uid);
 			char gids[32];
 			snprintf(gids, 32, "%i", conn->auth->gid);
-			char pips[32];
-			snprintf(pips, 32, "%i", param->pipes[1]);
 			const char* mip = NULL;
 			char tip[48];
 			if (conn->addr.sin6_family == AF_INET) {
@@ -587,7 +600,6 @@ void handleLine(int wfd, struct timespec* stt, struct conn* conn, struct work_pa
 				setenv("AVFTPD_FILE", chr, 1);
 				setenv("AVFTPD_UID", uids, 1);
 				setenv("AVFTPD_GID", gids, 1);
-				setenv("AVFTPD_WPIPE", pips, 1);
 				setenv("AVFTPD_EXPECTED", mip, 1);
 				execl(ourbinary, ourbinary, NULL);
 			} else {
@@ -617,8 +629,6 @@ void handleLine(int wfd, struct timespec* stt, struct conn* conn, struct work_pa
 			snprintf(uids, 32, "%i", conn->auth->uid);
 			char gids[32];
 			snprintf(gids, 32, "%i", conn->auth->gid);
-			char pips[32];
-			snprintf(pips, 32, "%i", param->pipes[1]);
 			const char* mip = NULL;
 			char tip[48];
 			if (conn->addr.sin6_family == AF_INET) {
@@ -642,7 +652,6 @@ void handleLine(int wfd, struct timespec* stt, struct conn* conn, struct work_pa
 				setenv("AVFTPD_FILE", chr, 1);
 				setenv("AVFTPD_UID", uids, 1);
 				setenv("AVFTPD_GID", gids, 1);
-				setenv("AVFTPD_WPIPE", pips, 1);
 				setenv("AVFTPD_EXPECTED", mip, 1);
 				execl(ourbinary, ourbinary, NULL);
 			} else {
@@ -672,8 +681,6 @@ void handleLine(int wfd, struct timespec* stt, struct conn* conn, struct work_pa
 			snprintf(uids, 32, "%i", conn->auth->uid);
 			char gids[32];
 			snprintf(gids, 32, "%i", conn->auth->gid);
-			char pips[32];
-			snprintf(pips, 32, "%i", param->pipes[1]);
 			const char* mip = NULL;
 			char tip[48];
 			if (conn->addr.sin6_family == AF_INET) {
@@ -697,7 +704,6 @@ void handleLine(int wfd, struct timespec* stt, struct conn* conn, struct work_pa
 				setenv("AVFTPD_FILE", chr, 1);
 				setenv("AVFTPD_UID", uids, 1);
 				setenv("AVFTPD_GID", gids, 1);
-				setenv("AVFTPD_WPIPE", pips, 1);
 				setenv("AVFTPD_EXPECTED", mip, 1);
 				execl(ourbinary, ourbinary, NULL);
 			} else {

@@ -10,5 +10,6 @@
 
 struct config* cfg;
 struct logsess* delog;
-char* ourbinary;
+char* encip;
+char ourbinary[256];
 #endif /* GLOBALS_H_ */

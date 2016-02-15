@@ -46,27 +46,40 @@ int main(int argc, char* argv[]) {
 		}
 		int fd = atoi(fds);
 		if (fd < 0) return 1;
-		struct sockaddr_in sin;
+		struct sockaddr_in6 sin;
 		if (pasv) {
 			char* exp = getenv("AVFTPD_EXPECTED");
 			if (exp == NULL) return 1;
 			int pfd = fd;
 			while (pasv) {
-				socklen_t l = sizeof(struct sockaddr_in);
+				socklen_t l = sizeof(struct sockaddr_in6);
 				fd = accept(pfd, (struct sockaddr*) &sin, &l);
-				if (streq(inet_ntoa(sin.sin_addr), exp)) {
-					pasv = 0;
+				const char* mip = NULL;
+				char tip[48];
+				if (sin.sin6_family == AF_INET) {
+					struct sockaddr_in *sip4 = (struct sockaddr_in*) &sin;
+					mip = inet_ntop(AF_INET, &sip4->sin_addr, tip, 48);
+				} else if (sin.sin6_family == AF_INET6) {
+					struct sockaddr_in6 *sip6 = (struct sockaddr_in6*) &sin;
+					if (memseq((unsigned char*) &sip6->sin6_addr, 10, 0) && memseq((unsigned char*) &sip6->sin6_addr + 10, 2, 0xff)) {
+						mip = inet_ntop(AF_INET, ((unsigned char*) &sip6->sin6_addr) + 12, tip, 48);
+					} else mip = inet_ntop(AF_INET6, &sip6->sin6_addr, tip, 48);
+				} else if (sin.sin6_family == AF_LOCAL) {
+					mip = "UNIX";
+				} else {
+					mip = "UNKNOWN";
 				}
+				if (streq(mip, exp)) {
+					pasv = 0;
+				} else close(fd);
 			}
 		}
 		char* file = getenv("AVFTPD_FILE");
 		char* uids = getenv("AVFTPD_UID");
 		char* gids = getenv("AVFTPD_GID");
-		char* pips = getenv("AVFTPD_WPIPE");
 		if (uids == NULL || file == NULL || gids == NULL) return 1;
 		uid_t uid = atol(uids);
 		uid_t gid = atol(gids);
-		int pipe = atol(pips);
 		setgid(gid);
 		setuid(uid);
 		if (streq_nocase(com, "list")) {
@@ -166,7 +179,7 @@ int main(int argc, char* argv[]) {
 		printf("Must run as root!\n");
 		return 1;
 	}
-	ourbinary = argv[0];
+	if (readlink("/proc/self/exe", ourbinary, 256) < 0) memcpy(ourbinary, argv[0], strlen(argv[0]));
 	printf("Loading Avuna %s %s\n", DAEMON_NAME, VERSION);
 #ifdef DEBUG
 	printf("Running in Debug mode!\n");
@@ -333,6 +346,12 @@ int main(int argc, char* argv[]) {
 		if (usp == NULL || !streq_nocase(usp, "file")) { //TODO: implement SQL
 			if (serv->id != NULL) errlog(delog, "Invalid user-provider for server: %s", serv->id);
 			else errlog(delog, "Invalid user-provider for server.");
+			continue;
+		}
+		encip = getConfigValue(serv, "server-ip");
+		if (encip == NULL) {
+			if (serv->id != NULL) errlog(delog, "Invalid server-ip for server: %s", serv->id);
+			else errlog(delog, "Invalid server-ip for server.");
 			continue;
 		}
 		const char* uspff = NULL;
