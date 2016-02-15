@@ -100,6 +100,7 @@ void closeConn(struct work_param* param, struct conn* conn) {
 	}
 	if (conn->user) xfree(conn->user);
 	if (conn->cwd) xfree(conn->cwd);
+	if (conn->ren) xfree(conn->ren);
 	close(conn->fd);
 	if (rem_collection(param->conns, conn)) {
 		errlog(param->logsess, "Failed to delete connection properly! This is bad!");
@@ -317,10 +318,10 @@ void handleLine(int wfd, struct timespec* stt, struct conn* conn, struct work_pa
 				path[pl + 1] = '"';
 				path[pl + 2] = 0;
 				writeFTPLine(conn, 257, path);
-				xfree(path);
 			} else {
 				writeFTPLine(conn, 550, "Failed to open directory.");
 			}
+			xfree(path);
 			recog = 1;
 		} else if (streq_nocase(cmd, "rein")) {
 			writeFTPLine(conn, 502, "REIN not implemented.");
@@ -409,6 +410,7 @@ void handleLine(int wfd, struct timespec* stt, struct conn* conn, struct work_pa
 			char* path = calcChroot(conn->auth->root, conn->cwd, line);
 			if (!path || !canStatFile(path, conn->auth->uid, conn->auth->gid)) {
 				writeFTPLine(conn, 550, "Failed to open file.");
+				if (path != NULL) xfree(path);
 				return;
 			}
 			struct stat st;
@@ -420,18 +422,22 @@ void handleLine(int wfd, struct timespec* stt, struct conn* conn, struct work_pa
 			} else {
 				writeFTPLine(conn, 550, "Failed to open file.");
 			}
+			xfree(path);
 			recog = 1;
 		} else if (streq_nocase(cmd, "cdup")) {
 			char* path = calcChroot(conn->auth->root, conn->cwd, "..");
 			if (!path || access(path, R_OK)) {
 				writeFTPLine(conn, 550, "Failed to open directory.");
+				if (path != NULL) xfree(path);
 				return;
 			}
 			struct stat st;
 			if (lstat(path, &st) < 0 || !S_ISDIR(st.st_mode)) {
 				writeFTPLine(conn, 550, "Failed to open directory.");
+				if (path != NULL) xfree(path);
 				return;
 			}
+			xfree(conn->cwd);
 			conn->cwd = path;
 			writeFTPLine(conn, 250, "Directory successfully changed.");
 			recog = 1;
@@ -439,13 +445,16 @@ void handleLine(int wfd, struct timespec* stt, struct conn* conn, struct work_pa
 			char* path = calcChroot(conn->auth->root, conn->cwd, line);
 			if (!path || access(path, R_OK)) {
 				writeFTPLine(conn, 550, "Failed to open directory.");
+				if (path != NULL) xfree(path);
 				return;
 			}
 			struct stat st;
 			if (lstat(path, &st) < 0 || !S_ISDIR(st.st_mode)) {
 				writeFTPLine(conn, 550, "Failed to open directory.");
+				if (path != NULL) xfree(path);
 				return;
 			}
+			xfree(conn->cwd);
 			conn->cwd = path;
 			writeFTPLine(conn, 250, "Directory successfully changed.");
 			recog = 1;
@@ -457,6 +466,7 @@ void handleLine(int wfd, struct timespec* stt, struct conn* conn, struct work_pa
 			char* chr = calcChroot(conn->auth->root, conn->cwd, line);
 			if (chr == NULL) {
 				writeFTPLine(conn, 550, "Failed to open file.");
+				if (chr != NULL) xfree(chr);
 				return;
 			}
 			int cl = conn->pasv;
@@ -498,6 +508,7 @@ void handleLine(int wfd, struct timespec* stt, struct conn* conn, struct work_pa
 				}
 				execl(ourbinary, ourbinary, NULL);
 			} else {
+				xfree(chr);
 				conn->skip = 0;
 				int st = 0; // TODO: non blocking
 				waitpid(frk, &st, 0);
@@ -516,6 +527,7 @@ void handleLine(int wfd, struct timespec* stt, struct conn* conn, struct work_pa
 			char* chr = calcChroot(conn->auth->root, conn->cwd, line);
 			if (chr == NULL) {
 				writeFTPLine(conn, 550, "Failed to open file.");
+				if (chr != NULL) xfree(chr);
 				return;
 			}
 			int cl = conn->pasv;
@@ -557,6 +569,7 @@ void handleLine(int wfd, struct timespec* stt, struct conn* conn, struct work_pa
 				}
 				execl(ourbinary, ourbinary, NULL);
 			} else {
+				xfree(chr);
 				int st = 0; // TODO: non blocking
 				waitpid(frk, &st, 0);
 				if (st == 0) {
@@ -574,6 +587,7 @@ void handleLine(int wfd, struct timespec* stt, struct conn* conn, struct work_pa
 			char* chr = calcChroot(conn->auth->root, conn->cwd, line);
 			if (chr == NULL) {
 				writeFTPLine(conn, 550, "Failed to open file.");
+				if (chr != NULL) xfree(chr);
 				return;
 			}
 			int cl = conn->pasv;
@@ -615,6 +629,7 @@ void handleLine(int wfd, struct timespec* stt, struct conn* conn, struct work_pa
 				}
 				execl(ourbinary, ourbinary, NULL);
 			} else {
+				xfree(chr);
 				int st = 0; // TODO: non blocking
 				waitpid(frk, &st, 0);
 				if (st == 0) {
@@ -632,6 +647,7 @@ void handleLine(int wfd, struct timespec* stt, struct conn* conn, struct work_pa
 			char* chr = calcChroot(conn->auth->root, conn->cwd, line);
 			if (chr == NULL || access(chr, R_OK)) {
 				writeFTPLine(conn, 550, "Failed to open file.");
+				if (chr != NULL) xfree(chr);
 				return;
 			}
 			int cl = conn->pasv;
@@ -672,6 +688,7 @@ void handleLine(int wfd, struct timespec* stt, struct conn* conn, struct work_pa
 				}
 				execl(ourbinary, ourbinary, NULL);
 			} else {
+				xfree(chr);
 				int st = 0; // TODO: non blocking
 				waitpid(frk, &st, 0);
 				if (st == 0) {
@@ -689,6 +706,7 @@ void handleLine(int wfd, struct timespec* stt, struct conn* conn, struct work_pa
 			char* chr = calcChroot(conn->auth->root, conn->cwd, line);
 			if (chr == NULL || access(chr, R_OK)) {
 				writeFTPLine(conn, 550, "Failed to open file.");
+				if (chr != NULL) xfree(chr);
 				return;
 			}
 			int cl = conn->pasv;
@@ -729,6 +747,7 @@ void handleLine(int wfd, struct timespec* stt, struct conn* conn, struct work_pa
 				}
 				execl(ourbinary, ourbinary, NULL);
 			} else {
+				xfree(chr);
 				int st = 0; // TODO: non blocking
 				waitpid(frk, &st, 0);
 				if (st == 0) {
@@ -746,6 +765,7 @@ void handleLine(int wfd, struct timespec* stt, struct conn* conn, struct work_pa
 			char* chr = calcChroot(conn->auth->root, conn->cwd, line);
 			if (chr == NULL || access(chr, R_OK)) {
 				writeFTPLine(conn, 550, "Failed to open file.");
+				if (chr != NULL) xfree(chr);
 				return;
 			}
 			int cl = conn->pasv;
@@ -787,6 +807,7 @@ void handleLine(int wfd, struct timespec* stt, struct conn* conn, struct work_pa
 				}
 				execl(ourbinary, ourbinary, NULL);
 			} else {
+				xfree(chr);
 				int st = 0; // TODO: non blocking
 				waitpid(frk, &st, 0);
 				if (st == 0) {
@@ -800,6 +821,7 @@ void handleLine(int wfd, struct timespec* stt, struct conn* conn, struct work_pa
 			char* path = calcChroot(conn->auth->root, conn->cwd, line);
 			if (!path || !canStatFile(path, conn->auth->uid, conn->auth->gid)) {
 				writeFTPLine(conn, 550, "Failed to open file.");
+				if (path != NULL) xfree(path);
 				return;
 			}
 			struct stat st;
@@ -810,11 +832,13 @@ void handleLine(int wfd, struct timespec* stt, struct conn* conn, struct work_pa
 			} else {
 				writeFTPLine(conn, 550, "Failed to open file.");
 			}
+			xfree(path);
 			recog = 1;
 		} else if (streq_nocase(cmd, "dele")) {
 			char* path = calcChroot(conn->auth->root, conn->cwd, line);
 			if (!path || !canWriteFile(path, conn->auth->uid, conn->auth->gid)) {
 				writeFTPLine(conn, 550, "Failed to open file.");
+				if (path != NULL) xfree(path);
 				return;
 			}
 			if (unlink(path)) {
@@ -822,10 +846,66 @@ void handleLine(int wfd, struct timespec* stt, struct conn* conn, struct work_pa
 			} else {
 				writeFTPLine(conn, 250, "Delete operation successful.");
 			}
+			xfree(path);
 			recog = 1;
 		} else if (streq_nocase(cmd, "rnfr")) {
+			char* path = calcChroot(conn->auth->root, conn->cwd, line);
+			if (!path || !canWriteFile(path, conn->auth->uid, conn->auth->gid)) {
+				writeFTPLine(conn, 550, "Failed to open file.");
+				if (path != NULL) xfree(path);
+				return;
+			}
+			if (conn->ren != NULL) xfree(conn->ren);
+			conn->ren = path;
+			writeFTPLine(conn, 350, "Ready for RNTO.");
 			recog = 1;
 		} else if (streq_nocase(cmd, "rnto")) {
+			if (conn->ren == NULL) {
+				writeFTPLine(conn, 503, "RNFR required first.");
+				return;
+			}
+			char* path = calcChroot(conn->auth->root, conn->cwd, line);
+			if (!path) {
+				writeFTPLine(conn, 550, "Failed to open file.");
+				if (path != NULL) xfree(path);
+				return;
+			}
+			struct stat st;
+			if (lstat(path, &st) == 0) {
+				if (!canWrite(conn->auth->uid, conn->auth->gid, st.st_uid, st.st_gid, st.st_mode)) {
+					writeFTPLine(conn, 550, "Failed to open file.");
+					if (path != NULL) xfree(path);
+					return;
+				}
+			} else {
+				if (errno == ENOENT) {
+					size_t plt = strlen(path);
+					if (endsWith(path, "/")) {
+						path[--plt] = 0;
+					}
+					char* ep = strrchr(path, '/');
+					if (ep != NULL) {
+						ep[0] = 0;
+					}
+					if (!canWriteFile(path, conn->auth->uid, conn->auth->gid)) {
+						writeFTPLine(conn, 550, "Failed to open file.");
+						if (path != NULL) xfree(path);
+						return;
+					}
+				} else {
+					writeFTPLine(conn, 550, "Failed to open file.");
+					if (path != NULL) xfree(path);
+					return;
+				}
+			}
+			if (rename(conn->ren, path) == 0) {
+				writeFTPLine(conn, 250, "Rename successful.");
+			} else {
+				writeFTPLine(conn, 550, "Rename failed.");
+			}
+			xfree(conn->ren);
+			conn->ren = NULL;
+			xfree(path);
 			recog = 1;
 		} else if (streq_nocase(cmd, "noop")) {
 			writeFTPLine(conn, 200, "noop");
@@ -854,14 +934,17 @@ void handleLine(int wfd, struct timespec* stt, struct conn* conn, struct work_pa
 			if (ep != NULL) ep[0] = 0;
 			if (pl <= 0 || !canWriteFile(path, conn->auth->uid, conn->auth->gid)) {
 				writeFTPLine(conn, 550, "Failed to open file.");
+				if (path != NULL) xfree(path);
 				return;
 			}
 			mkdir(path, 0664);
+			xfree(path);
 			recog = 1;
 		} else if (streq_nocase(cmd, "rmd")) {
 			char* path = calcChroot(conn->auth->root, conn->cwd, line);
 			if (!path || !canWriteFile(path, conn->auth->uid, conn->auth->gid)) {
 				writeFTPLine(conn, 550, "Failed to open file.");
+				if (path != NULL) xfree(path);
 				return;
 			}
 			if (rmdir(path)) {
@@ -869,6 +952,7 @@ void handleLine(int wfd, struct timespec* stt, struct conn* conn, struct work_pa
 			} else {
 				writeFTPLine(conn, 250, "Delete operation successful.");
 			}
+			xfree(path);
 			recog = 1;
 		} else if (streq_nocase(cmd, "help")) {
 			writeFTPBMLine(conn, 214, "The following commands are recognized.");
@@ -889,12 +973,14 @@ void handleLine(int wfd, struct timespec* stt, struct conn* conn, struct work_pa
 						char* path = calcChroot(conn->auth->root, conn->cwd, csep);
 						if (!path) {
 							writeFTPLine(conn, 550, "Failed to chmod file.");
+							if (path != NULL) xfree(path);
 							return;
 						}
 						struct stat st;
 						int p = 0;
 						if ((p = lstat(path, &st)) != 0 || (conn->auth->uid != 0 && st.st_uid != conn->auth->uid)) {
 							writeFTPLine(conn, 550, "Failed to chmod file.");
+							if (path != NULL) xfree(path);
 							return;
 						}
 						if (chmod(path, chm) == -1) {
@@ -902,6 +988,7 @@ void handleLine(int wfd, struct timespec* stt, struct conn* conn, struct work_pa
 						} else {
 							writeFTPLine(conn, 550, "Chmod successful.");
 						}
+						xfree(path);
 					} else {
 						writeFTPLine(conn, 500, "Invalid SITE CHMOD command.");
 					}

@@ -47,6 +47,7 @@ struct conn {
 		int sendfd;
 		int pasv;
 		char prot;
+		char* ren;
 };
 
 void run_accept(struct accept_param* param);
