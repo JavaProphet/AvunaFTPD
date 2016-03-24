@@ -32,7 +32,11 @@ char* realpathext(char* path) {
 	ssize_t pki = -1;
 	char* rp = NULL;
 	while (rp == NULL) {
+		char* prp = rp;
 		rp = realpath(path, NULL);
+		if (rp != NULL && prp != NULL) {
+			xfree(prp);
+		}
 		if (rp == NULL) {
 			if (errno != ENOENT) {
 				xfree(path);
@@ -48,8 +52,9 @@ char* realpathext(char* path) {
 	xfree(path);
 	if (pki < 0) return rp;
 	size_t rpl = strlen(rp);
-	rp = xrealloc(rp, rpl + pki + 1);
-	memcpy(rp + pki, orp + pki, strlen(orp + pki) + 1);
+	size_t orl = strlen(orp + pki);
+	rp = xrealloc(rp, pki + orl + 1);
+	memcpy(rp + pki, orp + pki, orl + 1);
 	return rp;
 }
 
