@@ -1073,8 +1073,8 @@ void run_work(struct work_param* param) {
 		struct conn* conns[cc];
 		int fdi = 0;
 		for (int i = 0; i < param->conns->size; i++) {
-			if (param->conns->data[i * param->conns->dsize] != NULL) {
-				conns[fdi] = (param->conns->data[i * param->conns->dsize]);
+			if (param->conns->data[i] != NULL) {
+				conns[fdi] = (param->conns->data[i]);
 				struct conn* conn = conns[fdi];
 				fds[fdi].fd = conns[fdi]->fd;
 				fds[fdi].events = POLLIN | ((conn->writeBuffer_size > 0 || (conn->tls && !conn->handshaked && gnutls_record_get_direction(conn->session))) ? POLLOUT : 0);
