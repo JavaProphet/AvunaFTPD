@@ -37,6 +37,9 @@
 int main(int argc, char* argv[]) {
 	char* com = getenv("AVFTPD_COMMAND");
 	if (com != NULL) {
+		struct timeval timeout;
+		timeout.tv_sec = 60;
+		timeout.tv_usec = 0;
 		int pasv = 1;
 		char* fds = getenv("AVFTPD_ACC_SERVER");
 		if (fds == NULL) {
@@ -54,6 +57,9 @@ int main(int argc, char* argv[]) {
 			while (pasv) {
 				socklen_t l = sizeof(struct sockaddr_in6);
 				fd = accept(pfd, (struct sockaddr*) &sin, &l);
+				if (fd < 0) return 0;
+				setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, (char *) &timeout, sizeof(timeout));
+				setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, (char *) &timeout, sizeof(timeout));
 				const char* mip = NULL;
 				char tip[48];
 				if (sin.sin6_family == AF_INET) {
@@ -100,13 +106,13 @@ int main(int argc, char* argv[]) {
 		char* file = getenv("AVFTPD_FILE");
 		char* uids = getenv("AVFTPD_UID");
 		char* gids = getenv("AVFTPD_GID");
-		char* sks = getenv("AVFTPD_GID");
+		char* sks = getenv("AVFTPD_SKIP");
 		if (uids == NULL || file == NULL || gids == NULL) return 1;
 		uid_t uid = atol(uids);
 		uid_t gid = atol(gids);
 		size_t sk = sks == NULL ? 0 : atol(sks);
 		setgid(gid);
-		setuid(uid);
+		if (uid != 0) setuid(uid);
 		if (streq_nocase(com, "list")) {
 			if (tls) {
 				int pipes[2];

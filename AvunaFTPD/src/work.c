@@ -173,16 +173,16 @@ ssize_t writeFTPMMLine(struct conn* conn, char* line) {
 }
 
 int canStat(uid_t uid, gid_t gid, uid_t fuid, uid_t fgid, mode_t mode) {
-	if (uid == fuid && (mode & S_IRUSR) == S_IRUSR) return 1;
-	else if (gid == fgid && (mode & S_IRGRP) == S_IRGRP) return 1;
-	else if ((mode & S_IROTH) == S_IROTH) return 1;
+	if (uid == 0 || (uid == fuid && (mode & S_IRUSR) == S_IRUSR)) return 1;
+	else if (uid == 0 || (gid == fgid && (mode & S_IRGRP) == S_IRGRP)) return 1;
+	else if (uid == 0 || (mode & S_IROTH) == S_IROTH) return 1;
 	return 0;
 }
 
 int canWrite(uid_t uid, gid_t gid, uid_t fuid, uid_t fgid, mode_t mode) {
-	if (uid == fuid && (mode & S_IWUSR) == S_IWUSR) return 1;
-	else if (gid == fgid && (mode & S_IWGRP) == S_IWGRP) return 1;
-	else if ((mode & S_IWOTH) == S_IWOTH) return 1;
+	if (uid == 0 || (uid == fuid && (mode & S_IWUSR) == S_IWUSR)) return 1;
+	else if (uid == 0 || (gid == fgid && (mode & S_IWGRP) == S_IWGRP)) return 1;
+	else if (uid == 0 || (mode & S_IWOTH) == S_IWOTH) return 1;
 	return 0;
 }
 
@@ -353,6 +353,11 @@ void handleLine(int wfd, struct timespec* stt, struct conn* conn, struct work_pa
 		} else if (streq_nocase(cmd, "pasv")) { //TODO EPRT/PORT
 			if (conn->sendfd >= 0) close(conn->sendfd);
 			conn->sendfd = socket(PF_INET, SOCK_STREAM, 0);
+			struct timeval timeout;
+			timeout.tv_sec = 60;
+			timeout.tv_usec = 0;
+			setsockopt(conn->sendfd, SOL_SOCKET, SO_RCVTIMEO, (char *) &timeout, sizeof(timeout));
+			setsockopt(conn->sendfd, SOL_SOCKET, SO_SNDTIMEO, (char *) &timeout, sizeof(timeout));
 			struct sockaddr_in sin;
 			sin.sin_family = AF_INET;
 			sin.sin_addr.s_addr = INADDR_ANY;
@@ -504,7 +509,9 @@ void handleLine(int wfd, struct timespec* stt, struct conn* conn, struct work_pa
 				setenv("AVFTPD_FILE", chr, 1);
 				setenv("AVFTPD_UID", uids, 1);
 				setenv("AVFTPD_GID", gids, 1);
-				setenv("AVFTPD_SKIP", conn->skip, 1);
+				char skp[32];
+				snprintf(skp, 32, "%lu", conn->skip);
+				setenv("AVFTPD_SKIP", skp, 1);
 				setenv("AVFTPD_EXPECTED", mip, 1);
 				if (conn->tls && conn->prot == 'p') {
 					setenv("AVFTPD_CERT", param->cert->certf, 1);
