@@ -572,7 +572,9 @@ void handleLine(int wfd, struct timespec* stt, struct conn* conn, struct work_pa
 				setenv("AVFTPD_FILE", chr, 1);
 				setenv("AVFTPD_UID", uids, 1);
 				setenv("AVFTPD_GID", gids, 1);
-				setenv("AVFTPD_SKIP", conn->skip, 1);
+				char skp[32];
+				snprintf(skp, 32, "%lu", conn->skip);
+				setenv("AVFTPD_SKIP", skp, 1);
 				setenv("AVFTPD_EXPECTED", mip, 1);
 				if (conn->tls && conn->prot == 'p') {
 					setenv("AVFTPD_CERT", param->cert->certf, 1);
@@ -632,7 +634,9 @@ void handleLine(int wfd, struct timespec* stt, struct conn* conn, struct work_pa
 				setenv("AVFTPD_FILE", chr, 1);
 				setenv("AVFTPD_UID", uids, 1);
 				setenv("AVFTPD_GID", gids, 1);
-				setenv("AVFTPD_SKIP", conn->skip, 1);
+				char skp[32];
+				snprintf(skp, 32, "%lu", conn->skip);
+				setenv("AVFTPD_SKIP", skp, 1);
 				setenv("AVFTPD_EXPECTED", mip, 1);
 				if (conn->tls && conn->prot == 'p') {
 					setenv("AVFTPD_CERT", param->cert->certf, 1);
@@ -810,7 +814,9 @@ void handleLine(int wfd, struct timespec* stt, struct conn* conn, struct work_pa
 				setenv("AVFTPD_FILE", chr, 1);
 				setenv("AVFTPD_UID", uids, 1);
 				setenv("AVFTPD_GID", gids, 1);
-				setenv("AVFTPD_SKIP", conn->skip, 1);
+				char skp[32];
+				snprintf(skp, 32, "%lu", conn->skip);
+				setenv("AVFTPD_SKIP", skp, 1);
 				setenv("AVFTPD_EXPECTED", mip, 1);
 				if (conn->tls && conn->prot == 'p') {
 					setenv("AVFTPD_CERT", param->cert->certf, 1);
