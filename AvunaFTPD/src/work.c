@@ -944,12 +944,21 @@ void handleLine(int wfd, struct timespec* stt, struct conn* conn, struct work_pa
 				return;
 			}
 			size_t pl = strlen(path);
-			if (pl > 0 && path[pl - 1] == '/') {
-				path[pl - 1] = 0;
+			if (pl > 0 && path[pl - 1] != '/') {
+				path = xrealloc(path, pl + 2);
+				pl++;
+				path[pl - 1] = '/';
+				path[pl] = 0;
 			}
-			char* ep = strrchr(path, '/');
-			if (ep != NULL) ep[0] = 0;
-			if (pl <= 0 || !canWriteFile(path, conn->auth->uid, conn->auth->gid)) {
+			char* parent = xmalloc(pl);
+			path[pl - 1] = 0;
+			memcpy(parent, path, pl - 1);
+			path[pl - 1] = '/';
+			char* tp = strrchr(parent, '/');
+			if (tp != NULL) {
+				tp[0] = 0;
+			}
+			if (pl <= 0 || !canWriteFile(parent, conn->auth->uid, conn->auth->gid)) {
 				writeFTPLine(conn, 550, "Failed to open file.");
 				if (path != NULL) xfree(path);
 				return;
@@ -957,6 +966,7 @@ void handleLine(int wfd, struct timespec* stt, struct conn* conn, struct work_pa
 			mkdir(path, 0664);
 			xfree(path);
 			recog = 1;
+			writeFTPLine(conn, 250, "Create directory operation successful.");
 		} else if (streq_nocase(cmd, "rmd")) {
 			char* path = calcChroot(conn->auth->root, conn->cwd, line);
 			if (!path || !canWriteFile(path, conn->auth->uid, conn->auth->gid)) {
