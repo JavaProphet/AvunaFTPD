@@ -35,6 +35,7 @@
 #include <dirent.h>
 
 int main(int argc, char* argv[]) {
+	signal(SIGPIPE, SIG_IGN);
 	char* com = getenv("AVFTPD_COMMAND");
 	if (com != NULL) {
 		struct timeval timeout;
