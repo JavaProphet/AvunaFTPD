@@ -167,8 +167,8 @@ int main(int argc, char* argv[]) {
 			}
 			ssize_t i;
 			lseek(fid, sk, SEEK_SET);
-			unsigned char buf[1024];
-			while ((i = read(fid, buf, 1024)) > 0) {
+			unsigned char buf[65536];
+			while ((i = read(fid, buf, 65536)) > 0) {
 				ssize_t wr = 0;
 				while (wr < i) {
 					ssize_t wrt = tls ? gnutls_record_send(session, buf + wr, i - wr) : write(fd, buf + wr, i - wr);
@@ -207,8 +207,8 @@ int main(int argc, char* argv[]) {
 			}
 			lseek(fid, sk, SEEK_SET);
 			ssize_t i;
-			unsigned char buf[1024];
-			while ((i = (tls ? gnutls_record_recv(session, buf, 1024) : read(fd, buf, 1024))) > 0) {
+			unsigned char buf[65536];
+			while ((i = (tls ? gnutls_record_recv(session, buf, 65536) : read(fd, buf, 65536))) > 0) {
 				ssize_t wr = 0;
 				while (wr < i) {
 					ssize_t wrt = write(fid, buf + wr, i - wr);
