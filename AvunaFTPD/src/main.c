@@ -298,11 +298,11 @@ int main(int argc, char* argv[]) {
 	} else {
 
 		pid_t f = fork();
-		if (f == 0) {
-			printf("Now running as daemon!\n");
+		if (f > 0) {
+			printf("Daemonized! PID = %i\n", f);
 			exit(0);
 		} else {
-			printf("Daemonized! PID = %i\n", f);
+			printf("Now running as daemon!\n");
 			if (setsid() < 0) {
 				printf("Failed to exit process tree: %s\n", strerror(errno));
 				return 1;

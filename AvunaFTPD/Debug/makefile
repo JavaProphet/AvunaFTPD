@@ -1,10 +1,8 @@
-################################################################################
-# Automatically-generated file. Do not edit!
-################################################################################
-
 -include ../makefile.init
 
 RM := rm -rf
+CP := cp -r
+CHMOD := chmod
 
 # All of the sources participating in the build are defined here
 -include sources.mk
@@ -29,7 +27,15 @@ all: AvunaFTPD
 AvunaFTPD: $(OBJS) $(USER_OBJS)
 	@echo 'Building target: $@'
 	@echo 'Invoking: GCC C Linker'
-	gcc  -o "AvunaFTPD" $(OBJS) $(USER_OBJS) $(LIBS)
+	$(CC) $(CFLAGS) -o "AvunaFTPD" $(OBJS) $(USER_OBJS) $(LIBS)
+	@echo 'Finished building target: $@'
+	@echo ' '
+
+# Tool invocations
+debug: $(OBJS) $(USER_OBJS)
+	@echo 'Building target: $@'
+	@echo 'Invoking: GCC C Linker'
+	$(CC) -DDEBUG $(CFLAGS) -o "AvunaFTPD" $(OBJS) $(USER_OBJS) $(LIBS)
 	@echo 'Finished building target: $@'
 	@echo ' '
 
