@@ -25,6 +25,7 @@
 #include "version.h"
 #include <sys/stat.h>
 #include "tls.h"
+#include <openssl/ssl.h>
 
 char* realpathext(char* path) {
 	const char* orp = path;
@@ -99,9 +100,9 @@ char* calcChroot(char* root, char* cwd, char* file) {
 void closeConn(struct work_param* param, struct conn* conn) {
 	if (conn->tls) {
 		if (conn->handshaked) {
-			gnutls_bye(conn->session, GNUTLS_SHUT_RDWR);
+			SSL_shutdown(conn->session);
 		}
-		gnutls_deinit(conn->session);
+		SSL_free(conn->session);
 	}
 	if (conn->user) xfree(conn->user);
 	if (conn->cwd) xfree(conn->cwd);
@@ -516,7 +517,6 @@ void handleLine(int wfd, struct timespec* stt, struct conn* conn, struct work_pa
 				if (conn->tls && conn->prot == 'p') {
 					setenv("AVFTPD_CERT", param->cert->certf, 1);
 					setenv("AVFTPD_KEY", param->cert->key, 1);
-					setenv("AVFTPD_CA", param->cert->ca, 1);
 				}
 				execl(ourbinary, ourbinary, NULL);
 			} else {
@@ -579,7 +579,6 @@ void handleLine(int wfd, struct timespec* stt, struct conn* conn, struct work_pa
 				if (conn->tls && conn->prot == 'p') {
 					setenv("AVFTPD_CERT", param->cert->certf, 1);
 					setenv("AVFTPD_KEY", param->cert->key, 1);
-					setenv("AVFTPD_CA", param->cert->ca, 1);
 				}
 				execl(ourbinary, ourbinary, NULL);
 			} else {
@@ -641,7 +640,6 @@ void handleLine(int wfd, struct timespec* stt, struct conn* conn, struct work_pa
 				if (conn->tls && conn->prot == 'p') {
 					setenv("AVFTPD_CERT", param->cert->certf, 1);
 					setenv("AVFTPD_KEY", param->cert->key, 1);
-					setenv("AVFTPD_CA", param->cert->ca, 1);
 				}
 				execl(ourbinary, ourbinary, NULL);
 			} else {
@@ -700,7 +698,6 @@ void handleLine(int wfd, struct timespec* stt, struct conn* conn, struct work_pa
 				if (conn->tls && conn->prot == 'p') {
 					setenv("AVFTPD_CERT", param->cert->certf, 1);
 					setenv("AVFTPD_KEY", param->cert->key, 1);
-					setenv("AVFTPD_CA", param->cert->ca, 1);
 				}
 				execl(ourbinary, ourbinary, NULL);
 			} else {
@@ -759,7 +756,6 @@ void handleLine(int wfd, struct timespec* stt, struct conn* conn, struct work_pa
 				if (conn->tls && conn->prot == 'p') {
 					setenv("AVFTPD_CERT", param->cert->certf, 1);
 					setenv("AVFTPD_KEY", param->cert->key, 1);
-					setenv("AVFTPD_CA", param->cert->ca, 1);
 				}
 				execl(ourbinary, ourbinary, NULL);
 			} else {
@@ -821,7 +817,6 @@ void handleLine(int wfd, struct timespec* stt, struct conn* conn, struct work_pa
 				if (conn->tls && conn->prot == 'p') {
 					setenv("AVFTPD_CERT", param->cert->certf, 1);
 					setenv("AVFTPD_KEY", param->cert->key, 1);
-					setenv("AVFTPD_CA", param->cert->ca, 1);
 				}
 				execl(ourbinary, ourbinary, NULL);
 			} else {
@@ -1100,7 +1095,7 @@ void run_work(struct work_param* param) {
 				conns[fdi] = (param->conns->data[i]);
 				struct conn* conn = conns[fdi];
 				fds[fdi].fd = conns[fdi]->fd;
-				fds[fdi].events = POLLIN | ((conn->writeBuffer_size > 0 || (conn->tls && !conn->handshaked && gnutls_record_get_direction(conn->session))) ? POLLOUT : 0);
+				fds[fdi].events = POLLIN | ((conn->writeBuffer_size > 0 || (conn->tls && !conn->handshaked && conn->ssl_nextdir == 2)) ? POLLOUT : 0);
 				fds[fdi++].revents = 0;
 				if (fdi == cc) break;
 			}
@@ -1138,52 +1133,62 @@ void run_work(struct work_param* param) {
 				goto cont;
 			}
 			if (conn->tls && !conn->handshaked) {
-				int r = gnutls_handshake(conn->session);
-				if (gnutls_error_is_fatal(r)) {
+				int r = SSL_accept(conn->session);
+				if (r == 1) {
+					conn->handshaked = 1;
+				} else if (r == 2) {
+					//printf("%16lX fail handshake\n", conn);
 					closeConn(param, conn);
 					conn = NULL;
 					goto cont;
-				} else if (r == GNUTLS_E_SUCCESS) {
-					conn->handshaked = 1;
+				} else {
+					int err = SSL_get_error(conn->session, r);
+					if (err == SSL_ERROR_WANT_READ) conn->ssl_nextdir = 1;
+					else if (err == SSL_ERROR_WANT_WRITE) conn->ssl_nextdir = 2;
+					else {
+						//printf("%16lX fail handshake2\n", conn);
+						closeConn(param, conn);
+						conn = NULL;
+						goto cont;
+					}
 				}
 				goto cont;
 			}
 			if ((re & POLLIN) == POLLIN) {
 				size_t tr = 0;
+				int ftr = 0;
 				if (conn->tls) {
-					tr = gnutls_record_check_pending(conn->session);
+					tr = SSL_pending(conn->session);
 					if (tr == 0) {
-						tr += 1024;
-					}
+						tr += 4096;
+						ftr = 1;
+					}	
 				} else {
 					ioctl(fds[i].fd, FIONREAD, &tr);
 				}
 				unsigned char* loc;
 				if (conn->readBuffer == NULL) {
 					conn->readBuffer = xmalloc(tr); // TODO: max upload?
-					conn->readBuffer_size = tr;
+					conn->readBuffer_size = 0;
 					loc = conn->readBuffer;
 				} else {
-					conn->readBuffer_size += tr;
-					conn->readBuffer = xrealloc(conn->readBuffer, conn->readBuffer_size);
-					loc = conn->readBuffer + conn->readBuffer_size - tr;
+					//conn->readBuffer_size += tr;
+					conn->readBuffer = xrealloc(conn->readBuffer, conn->readBuffer_size + tr);
+					loc = conn->readBuffer + conn->readBuffer_size;
 				}
 				ssize_t r = 0;
 				if (r == 0 && tr == 0) { // nothing to read, but wont block.
 					ssize_t x = 0;
 					if (conn->tls) {
-						x = gnutls_record_recv(conn->session, loc + r, tr - r);
-						if (x <= 0 && gnutls_error_is_fatal(x)) {
+						x = SSL_read(conn->session, loc + r, tr - r);
+						if (x <= 0) {
+							int serr = SSL_get_error(conn->session, x);
+							if (serr == SSL_ERROR_WANT_WRITE || serr == SSL_ERROR_WANT_READ) goto cont;
 							closeConn(param, conn);
 							conn = NULL;
 							goto cont;
-						} else if (x <= 0) {
-							if (r < tr) {
-								conn->readBuffer_size += r - tr;
-								conn->readBuffer = xrealloc(conn->readBuffer, conn->readBuffer_size);
-								tr = r;
-							}
-							break;
+						} else {
+							conn->readBuffer_size += x;
 						}
 					} else {
 						x = read(fds[i].fd, loc + r, tr - r);
@@ -1191,6 +1196,8 @@ void run_work(struct work_param* param) {
 							closeConn(param, conn);
 							conn = NULL;
 							goto cont;
+						}else{
+							conn->readBuffer_size += x;	
 						}
 					}
 					r += x;
@@ -1198,25 +1205,25 @@ void run_work(struct work_param* param) {
 				while (r < tr) {
 					ssize_t x = 0;
 					if (conn->tls) {
-						x = gnutls_record_recv(conn->session, loc + r, tr - r);
-						if (x <= 0 && gnutls_error_is_fatal(x)) {
+						x = SSL_read(conn->session, loc + r, tr - r);
+						if (x <= 0) {
+							int serr = SSL_get_error(conn->session, x);
+							if (serr == SSL_ERROR_WANT_WRITE || serr == SSL_ERROR_WANT_READ) goto cont;
 							closeConn(param, conn);
 							conn = NULL;
 							goto cont;
-						} else if (x <= 0) {
-							if (r < tr) {
-								conn->readBuffer_size += r - tr;
-								conn->readBuffer = xrealloc(conn->readBuffer, conn->readBuffer_size);
-								tr = r;
-							}
-							break;
+						} else {
+							conn->readBuffer_size += x;
 						}
+						if(ftr) break;
 					} else {
 						x = read(fds[i].fd, loc + r, tr - r);
 						if (x <= 0) {
 							closeConn(param, conn);
 							conn = NULL;
 							goto cont;
+						}else{
+							conn->readBuffer_size += x;	
 						}
 					}
 					r += x;
@@ -1228,8 +1235,9 @@ void run_work(struct work_param* param) {
 				}
 			}
 			if ((re & POLLOUT) == POLLOUT && conn != NULL) {
-				ssize_t mtr = conn->tls ? gnutls_record_send(conn->session, conn->writeBuffer, conn->writeBuffer_size) : write(fds[i].fd, conn->writeBuffer, conn->writeBuffer_size);
-				if (mtr < 0 && (conn->tls ? gnutls_error_is_fatal(mtr) : errno != EAGAIN)) {
+				ssize_t mtr = conn->tls ? SSL_write(conn->session, conn->writeBuffer, conn->writeBuffer_size) : write(fds[i].fd, conn->writeBuffer, conn->writeBuffer_size);
+				int serr = (conn->tls && mtr < 0) ? SSL_get_error(conn->session, mtr) : 0;
+				if (mtr < 0 && (conn->tls ? ((serr != SSL_ERROR_SYSCALL || errno != EAGAIN) && serr != SSL_ERROR_WANT_WRITE && serr != SSL_ERROR_WANT_READ) : errno != EAGAIN)) {	
 					closeConn(param, conn);
 					conn = NULL;
 					goto cont;
@@ -1246,7 +1254,7 @@ void run_work(struct work_param* param) {
 				}
 			}
 			cont: ;
-			if (conn != NULL && conn->writeBuffer_size <= 0) {
+			/*if (conn != NULL && conn->writeBuffer_size <= 0) {
 				if (conn->kwr) {
 					closeConn(param, conn);
 					conn = NULL;
@@ -1273,7 +1281,7 @@ void run_work(struct work_param* param) {
 						conn->handshaked = 1;
 					}
 				}
-			}
+			}*/
 			if (--cp == 0) break;
 		}
 	}

@@ -29,7 +29,7 @@
 #include "collection.h"
 #include "work.h"
 #include <sys/types.h>
-#include <gnutls/gnutls.h>
+#include <openssl/ssl.h>
 #include "tls.h"
 #include <sys/wait.h>
 #include <dirent.h>
@@ -92,26 +92,16 @@ int main(int argc, char* argv[]) {
 		}
 		char* certf = getenv("AVFTPD_CERT");
 		char* keyf = getenv("AVFTPD_KEY");
-		char* caf = getenv("AVFTPD_CA");
 		int tls = 0;
-		gnutls_session_t session;
-		if (certf != NULL && keyf != NULL && caf != NULL) {
-			gnutls_global_init();
-			initdh();
-			struct cert* crt = loadCert(caf, certf, keyf);
+		SSL* session;
+		if (certf != NULL && keyf != NULL) {
+			struct cert* crt = loadCert(certf, keyf);
 			tls = 1;
-			gnutls_init(&session, GNUTLS_SERVER);
-			gnutls_priority_set(session, crt->priority);
-			gnutls_credentials_set(session, GNUTLS_CRD_CERTIFICATE, crt->cert);
-			gnutls_certificate_server_set_request(session, GNUTLS_CERT_IGNORE);
-			gnutls_transport_set_int2(session, fd, fd);
-			int r = gnutls_handshake(session);
-			while (r != GNUTLS_E_SUCCESS) {
-				if (gnutls_error_is_fatal(r)) {
-					return 1;
-				}
-				gnutls_handshake(session);
-			}
+			session = SSL_new(crt->ctx);
+			SSL_set_accept_state(session);	
+			SSL_set_fd(session, fd);
+			int r = SSL_accept(session); 
+			if(r != 1) return 1;
 		}
 		char* file = getenv("AVFTPD_FILE");
 		char* uids = getenv("AVFTPD_UID");
@@ -142,12 +132,13 @@ int main(int argc, char* argv[]) {
 					while ((x = read(pipes[0], buf, 1024)) > 0) {
 						ssize_t wx = 0;
 						while (wx < x) {
-							ssize_t px = gnutls_record_send(session, buf + wx, x - wx);
+							ssize_t px = SSL_write(session, buf + wx, x - wx);
 							if (px < 1) return 1;
 							wx += px;
 						}
 					}
-					gnutls_bye(session, GNUTLS_SHUT_RDWR);
+					SSL_shutdown(session);
+					close(fd);
 					return stp;
 				}
 			} else {
@@ -180,7 +171,7 @@ int main(int argc, char* argv[]) {
 			while ((i = read(fid, buf, 65536)) > 0) {
 				ssize_t wr = 0;
 				while (wr < i) {
-					ssize_t wrt = tls ? gnutls_record_send(session, buf + wr, i - wr) : write(fd, buf + wr, i - wr);
+					ssize_t wrt = tls ? SSL_write(session, buf + wr, i - wr) : write(fd, buf + wr, i - wr);
 					if (wrt < 0) {
 						return 1;
 					}
@@ -217,7 +208,7 @@ int main(int argc, char* argv[]) {
 			lseek(fid, sk, SEEK_SET);
 			ssize_t i;
 			unsigned char buf[65536];
-			while ((i = (tls ? gnutls_record_recv(session, buf, 65536) : read(fd, buf, 65536))) > 0) {
+			while ((i = (tls ? SSL_read(session, buf, 65536) : read(fd, buf, 65536))) > 0) {
 				ssize_t wr = 0;
 				while (wr < i) {
 					ssize_t wrt = write(fid, buf + wr, i - wr);
@@ -228,7 +219,8 @@ int main(int argc, char* argv[]) {
 				}
 			}
 		}
-		if (tls) gnutls_bye(session, GNUTLS_SHUT_RDWR);
+		if(tls) SSL_shutdown(session);
+		close(fd);
 		return 0;
 	}
 	if (getuid() != 0 || getgid() != 0) {
@@ -355,8 +347,6 @@ int main(int argc, char* argv[]) {
 		errlog(delog, "Error writing PID file: %s.", strerror(errno));
 		return 1;
 	}
-	gnutls_global_init();
-	initdh();
 	int servsl;
 	struct cnode** servs = getCatsByCat(cfg, CAT_SERVER, &servsl);
 	int sr = 0;
@@ -540,16 +530,12 @@ int main(int argc, char* argv[]) {
 			}
 			const char* cert = getConfigValue(ssln, "publicKey");
 			const char* key = getConfigValue(ssln, "privateKey");
-			const char* ca = getConfigValue(ssln, "ca");
-			if (ca != NULL && access(ca, R_OK)) {
-				errlog(slog, "CA for SSL node was not valid, loading without CA!");
-				ca = NULL;
-			}
 			if (cert == NULL || key == NULL || access(cert, R_OK) || access(key, R_OK)) {
 				errlog(slog, "Invalid SSL node! No publicKey/privateKey value or cannot be read!");
 				goto pssl;
 			}
-			ap->cert = loadCert(ca, cert, key);
+			ap->cert = loadCert(cert, key);
+			if(ap->cert == NULL) ap->cert = dummyCert();
 		} else {
 			ap->cert = NULL;
 		}

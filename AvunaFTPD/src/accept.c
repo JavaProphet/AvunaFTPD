@@ -22,6 +22,8 @@
 #include "version.h"
 #include <sys/types.h>
 
+//TODO: SNI?
+
 void run_accept(struct accept_param* param) {
 	static int one = 1;
 	static unsigned char onec = 1;
@@ -32,11 +34,7 @@ void run_accept(struct accept_param* param) {
 	spfd.events = POLLIN;
 	spfd.revents = 0;
 	spfd.fd = param->server_fd;
-	static char* header = "220 Avuna "
-	DAEMON_NAME
-	" "
-	VERSION
-	"\r\n"; //why formatter?
+	static char* header = "220 Avuna " DAEMON_NAME " " VERSION "\r\n";
 	size_t headerlen = strlen(header);
 	while (1) {
 		struct conn* c = xmalloc(sizeof(struct conn));
@@ -59,22 +57,23 @@ void run_accept(struct accept_param* param) {
 		c->twr = 0;
 		c->prot = 'c';
 		c->ren = NULL;
-		//if (param->cert != NULL) {
-		//	gnutls_init(&c->session, GNUTLS_SERVER | GNUTLS_NONBLOCK);
-		//	gnutls_priority_set(c->session, param->cert->priority);
-		//	gnutls_credentials_set(c->session, GNUTLS_CRD_CERTIFICATE, param->cert->cert);
-		//	gnutls_certificate_server_set_request(c->session, GNUTLS_CERT_IGNORE);
-		//	c->tls = 1;
-		//} else {
-		c->tls = 0;
-		//}
+		if (param->cert != NULL) {
+			c->session = SSL_new(param->cert->ctx);
+			SSL_set_mode(c->session, SSL_MODE_ACCEPT_MOVING_WRITE_BUFFER | SSL_MODE_ENABLE_PARTIAL_WRITE);
+			SSL_set_accept_state(c->session);
+			c->tls = 1;
+		} else {
+			c->tls = 0;
+		}
 		if (poll(&spfd, 1, -1) < 0) {
 			printf("Error while polling server: %s\n", strerror(errno));
+			if (param->cert != NULL) SSL_free(c->session);			
 			xfree(c);
 			continue;
 		}
 		if ((spfd.revents ^ POLLIN) != 0) {
-			printf("Error after polling server: %i (poll revents), closing server!\n", spfd.revents);
+			errlog(param->logsess, "Error after polling server: %i (poll revents), closing server!", spfd.revents);			
+			if (param->cert != NULL) SSL_free(c->session);			
 			xfree(c);
 			close(param->server_fd);
 			break;
@@ -82,6 +81,7 @@ void run_accept(struct accept_param* param) {
 		spfd.revents = 0;
 		int cfd = accept4(param->server_fd, &c->addr, &c->addrlen, SOCK_CLOEXEC);
 		if (cfd < 0) {
+			if (param->cert != NULL) SSL_free(c->session);			
 			if (errno == EAGAIN) continue;
 			printf("Error while accepting client: %s\n", strerror(errno));
 			xfree(c);
@@ -96,25 +96,34 @@ void run_accept(struct accept_param* param) {
 			close(cfd);
 			continue;
 		}
-		//if (param->cert != NULL) {
-		//gnutls_transport_set_int2(c->session, cfd, cfd);
-		/*if (sniCallback != NULL) {
-		 struct sni_data* ld = xmalloc(sizeof(struct sni_data));
-		 ld->this = this;
-		 ld->sniCallback = sniCallback;
-		 lsd = ld;
-		 gnutls_handshake_set_post_client_hello_function(sessiond, handleSNI);
-		 }*/
-		//int r = gnutls_handshake(c->session);
-		//if (gnutls_error_is_fatal(r)) {
-		//	gnutls_deinit(c->session);
-		//	close(c->fd);
-		//	xfree(c);
-		//	continue;
-		//} else if (r == GNUTLS_E_SUCCESS) {
-		//	c->handshaked = 1;
-		//}
-		//}
+		if (param->cert != NULL) {
+			SSL_set_fd(c->session, c->fd);
+			int r = SSL_accept(c->session);
+			if (r == 1) {
+				c->handshaked = 1;
+			} else if (r == 2) {
+				SSL_free(c->session);
+				close(c->fd);
+				xfree(c);
+				continue;
+			} else {
+				int err = SSL_get_error(c->session, r);
+				if (err == SSL_ERROR_WANT_READ) c->ssl_nextdir = 1;
+				else if (err == SSL_ERROR_WANT_WRITE) c->ssl_nextdir = 2;
+				else {
+					SSL_free(c->session);
+					close(c->fd);
+					xfree(c);
+					continue;
+				}
+			}
+		}
+		if (param->cert != NULL && param->cert->isDummy && SSL_get_SSL_CTX(c->session) == param->cert->ctx) {
+			SSL_free(c->session);
+			close(c->fd);
+			xfree(c);
+			continue;
+		}
 		struct work_param* work = param->works[rand() % param->works_count];
 		c->writeBuffer = xmalloc(headerlen);
 		memcpy(c->writeBuffer, header, headerlen);

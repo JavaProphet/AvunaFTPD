@@ -12,7 +12,7 @@
 #include "collection.h"
 #include <sys/socket.h>
 #include "work.h"
-#include <gnutls/gnutls.h>
+#include <openssl/ssl.h>
 #include <netinet/ip6.h>
 
 struct accept_param {
@@ -36,7 +36,7 @@ struct conn {
 		size_t writeBuffer_size;
 		int tls;
 		int handshaked;
-		gnutls_session_t session;
+		SSL* session;
 		int state;
 		char* user;
 		struct user* auth;
@@ -48,6 +48,7 @@ struct conn {
 		int pasv;
 		char prot;
 		char* ren;
+		int ssl_nextdir;
 };
 
 void run_accept(struct accept_param* param);
